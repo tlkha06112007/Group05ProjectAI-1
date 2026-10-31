@@ -1,0 +1,573 @@
+import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+/**
+ * Speech synthesis, Vietnamese and English first.
+ *
+ * Microsoft Edge's neural voices are genuinely native Vietnamese — the model was
+ * trained on Vietnamese speakers, so stress and tone land correctly instead of
+ * being spelled out letter by letter. It also needs no API key, which matters
+ * because a teacher should be able to press play the moment they install this.
+ *
+ * The catalogue itself lives in `@/lib/lesson/voices`, so client components can
+ * ask which voice suits a lesson's language; this module only talks to the
+ * service.
+ */
+export {
+  DEFAULT_VOICE,
+  EN_VOICES,
+  VI_VOICES,
+  VOICES,
+  isVoiceId,
+  isVietnameseVoice,
+  pickVoice,
+  resolveVoice,
+  voiceForLanguage,
+  voicesForLanguage,
+  type LessonVoiceId,
+} from "@/lib/lesson/voices";
+
+import { resolveVoice, voiceForLanguage, type LessonVoiceId } from "@/lib/lesson/voices";
+import { speakLocal } from "./tts-local";
+import { localVoiceFor, speakLocalProvider, type LocalVoiceOption } from "./local-voices";
+import { readSpeechRate, readTtsEngine, type TtsEngine } from "./tts-settings";
+
+/**
+ * Keeps a bug in msedge-tts from killing the whole app.
+ *
+ * The library writes and unlinks its `metadata.json` from inside stream
+ * callbacks. When a chunk comes back with no boundary metadata, those callbacks
+ * touch a file that is not there — and an exception thrown from a stream
+ * handler cannot be caught by the `await` that started the work, so it surfaces
+ * as an uncaughtException and takes the server down. The workaround above
+ * (creating the file up front) covers the unlink path, but not the write path
+ * when the temp directory disappears underneath a concurrent request.
+ *
+ * So the failure is contained here rather than left to a try/catch that cannot
+ * reach it. Nothing is lost: the caller has already moved on, and the narration
+ * it wanted was either served from cache or failed in a way it handles. Swallow
+ * only this one shape — an unexpected error must still crash loudly in dev
+ * rather than be hidden behind a lesson that mysteriously goes quiet.
+ */
+const TEMP_DIR_PREFIX = "eduaistudio-tts-";
+const tempPathNoise = /\bENOENT\b|eduaistudio-tts-/;
+
+process.on("uncaughtException", (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const path = (error as { path?: string } | null)?.path ?? "";
+  if (tempPathNoise.test(message) || path.includes(TEMP_DIR_PREFIX)) {
+    return;
+  }
+  // Anything else is a real bug: rethrow so it is loud rather than swallowed.
+  throw error;
+});
+
+/** Edge TTS hard-limits a single request; split on sentence boundaries. */
+const MAX_CHARS_PER_REQUEST = 1_200;
+
+/**
+ * A single chunk must finish inside this window. Without it one stalled stream
+ * wedges the shared socket and every later request waits on it forever — an
+ * aborted client request is enough to trigger.
+ *
+ * 45 seconds, not 25: a slide narration of 400-600 characters is ordinary, and
+ * measured at 440 characters the service took past 25s. Failing that meant the
+ * voice fell back to the browser for a large share of lessons. The stall this
+ * guards against is still caught — it just takes longer to declare.
+ */
+const CHUNK_TIMEOUT_MS = 45_000;
+
+function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} quá ${Math.round(ms / 1000)}s`)),
+      ms,
+    );
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function splitForSpeech(text: string, limit = MAX_CHARS_PER_REQUEST): string[] {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= limit) return clean ? [clean] : [];
+
+  const out: string[] = [];
+  let buf = "";
+  for (const part of clean.split(/(?<=[.!?…])\s+/)) {
+    if (buf && buf.length + part.length + 1 > limit) {
+      out.push(buf);
+      buf = part;
+    } else {
+      buf = buf ? `${buf} ${part}` : part;
+    }
+  }
+  if (buf) out.push(buf);
+  return out;
+}
+
+/**
+ * Edge's endpoint occasionally drops a synthesis turn mid-stream, and hands out
+ * fresh trust tokens slowly enough that back-to-back handshakes trip it. Both
+ * look the same to us and both are worth retrying — the alternative is a lesson
+ * that silently loses its narration.
+ */
+function isRetryable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|429|503/i.test(
+      message,
+    )
+    || /stream closed|turn\.end|websocket|not open/i.test(message)
+    || /quá \d+s$/.test(message) // our own chunk timeout: a stalled socket
+  );
+}
+
+/**
+ * One long-lived socket, reused across requests.
+ *
+ * Edge's endpoint throttles fresh handshakes: opening a connection per sentence
+ * made roughly one in three narrations fail with a mid-stream close. Holding a
+ * single connection and rebuilding it only when it actually dies cuts the
+ * handshakes to roughly one, which is both faster and far more reliable.
+ */
+interface Connection {
+  tts: MsEdgeTTS;
+  dir: string;
+}
+
+let shared: Connection | null = null;
+/** Serialises synthesis: one socket, one request at a time. */
+let queue: Promise<unknown> = Promise.resolve();
+
+function openConnection(): Promise<Connection> {
+  const tts = new MsEdgeTTS();
+  const connection: Connection = { tts, dir: "" };
+  return (async () => {
+    try {
+      connection.dir = await mkdtemp(join(tmpdir(), "eduaistudio-tts-"));
+      return connection;
+    } catch (error) {
+      try { tts.close(); } catch { /* never opened */ }
+      throw error;
+    }
+  })();
+}
+
+async function closeConnection(connection: Connection | null) {
+  if (!connection) return;
+  try { connection.tts.close(); } catch { /* already gone */ }
+  await rm(connection.dir, { recursive: true, force: true }).catch(() => {});
+  if (shared === connection) shared = null;
+}
+
+/** Serialises access: one shared socket, one synthesis at a time. */
+function withConnection<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(
+    () => task(),
+    () => task(),
+  );
+  // Keep the chain alive even when a task rejects, or every later call inherits
+  // the rejection.
+  queue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
+ * Duration of an MP3 in seconds, by walking its frame headers.
+ *
+ * Needed only to line up the second and later chunks: the voice service reports
+ * word offsets per request, each starting at zero, but the chunks are
+ * concatenated into a single file, so chunk N's timings have to be shifted by
+ * the real length of chunks 1..N-1.
+ *
+ * A byte-size estimate would be wrong for anything but constant-bitrate, and
+ * this stream is not guaranteed to be. The fallback is deliberately crude but
+ * it is only ever a few tens of milliseconds off, which is invisible.
+ */
+const MP3_BITRATES_V1_L3 = [
+  0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
+];
+const MP3_RATES_V1 = [44100, 48000, 32000, 0];
+
+function mp3DurationSeconds(audio: Uint8Array): number {
+  try {
+    let offset = 0;
+    // Skip an ID3v2 tag if present, so the walk does not start on garbage.
+    if (
+      audio[0] === 0x49 && audio[1] === 0x44 && audio[2] === 0x33
+    ) {
+      const size =
+        ((audio[6] & 0x7f) << 21) | ((audio[7] & 0x7f) << 14)
+        | ((audio[8] & 0x7f) << 7) | (audio[9] & 0x7f);
+      offset = 10 + size;
+    }
+
+    let samples = 0;
+    let sampleRate = 0;
+    while (offset + 4 <= audio.length) {
+      if (audio[offset] !== 0xff || (audio[offset + 1] & 0xe0) !== 0xe0) {
+        offset += 1;
+        continue;
+      }
+      const header = audio[offset + 1];
+      // Only MPEG-1 Layer III is emitted here; anything else is not ours.
+      if ((header & 0x18) !== 0x18 || (header & 0x06) !== 0x02) {
+        offset += 1;
+        continue;
+      }
+      const bitrate = MP3_BITRATES_V1_L3[(audio[offset + 2] & 0xe0) >> 5];
+      const rate = MP3_RATES_V1[(audio[offset + 2] & 0x0c) >> 2];
+      if (bitrate === 0 || rate === 0) {
+        offset += 1;
+        continue;
+      }
+      const padding = (audio[offset + 2] & 0x02) >> 1;
+      samples += 1152;
+      sampleRate = rate;
+      offset += (Math.floor((144 * bitrate * 1000) / rate) + padding);
+    }
+    if (samples > 0 && sampleRate > 0) return samples / sampleRate;
+  } catch {
+    /* fall through to the estimate */
+  }
+  // 96 kbps constant, which is what we request.
+  return (audio.length * 8) / 96_000;
+}
+
+/** One word's speaking window, in seconds from the start of the audio. */
+export interface WordMark {
+  start: number;
+  end: number;
+  /**
+   * The word as the service read it, not as the slide spells it. The client
+   * needs it to line the boundaries up with the subtitle: the slide shows
+   * "9 × 1" while the service reports "9", "x", "1".
+   */
+  text: string;
+}
+
+interface Synthesis {
+  audio: Uint8Array;
+  words: WordMark[];
+}
+
+/** Edge reports offsets in 100-nanosecond ticks, per chunk. */
+async function readWordMarks(metadataFilePath: string): Promise<WordMark[]> {
+  const marks: WordMark[] = [];
+  let raw: string;
+  try {
+    raw = await readFile(metadataFilePath, "utf8");
+  } catch {
+    return marks;
+  }
+  try {
+    const parsed = JSON.parse(raw) as {
+      Metadata?: Array<{ Data?: { Offset?: number; Duration?: number; text?: { Text?: string } } }>;
+    };
+    for (const entry of parsed.Metadata ?? []) {
+      const offsetTicks = entry.Data?.Offset;
+      const durationTicks = entry.Data?.Duration;
+      if (typeof offsetTicks !== "number") continue;
+      const start = offsetTicks / 1e7;
+      const end = start + (typeof durationTicks === "number" ? durationTicks / 1e7 : 0.2);
+      marks.push({
+        start,
+        end: Math.max(end, start + 0.05),
+        text: entry.Data?.text?.Text ?? "",
+      });
+    }
+  } catch {
+    /* a malformed metadata file just means no karaoke for this line */
+  }
+  return marks;
+}
+
+/** Synthesises every chunk down one connection, then hands the bytes back. */
+async function synthesizeOnce(
+  pieces: string[],
+  voice: LessonVoiceId,
+): Promise<Synthesis> {
+  if (!shared) shared = await openConnection();
+  const { name, prosody } = resolveVoice(voice);
+  const speechRate = await readSpeechRate();
+  const rateOffset = Math.round((speechRate - 1) * 100);
+  const rateStr = `${rateOffset >= 0 ? "+" : ""}${rateOffset}%`;
+  const effectiveProsody = {
+    ...prosody,
+    rate: prosody?.rate ?? (speechRate !== 1.0 ? rateStr : undefined),
+  };
+
+  const buffers: Uint8Array[] = [];
+  const words: WordMark[] = [];
+  // Word timings are per-chunk and start at zero, but the chunks are
+  // concatenated into one file — so every chunk's timings must be shifted by
+  // the real duration of everything before it.
+  let timelineOffset = 0;
+
+  // One metadata handshake per narration, not per chunk: the voice and the
+  // format never change mid-narration, and each setMetadata is a network
+  // round trip. (The third argument stays mandatory — msedge-tts reads
+  // `metadataOptions.voiceLocale` unguarded, so omitting it throws as soon as
+  // the voice is already configured.)
+  await shared.tts.setMetadata(name, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3, {
+    // Without this the service returns audio with no word timings at all, and
+    // the subtitle can only be highlighted by guessing.
+    wordBoundaryEnabled: true,
+  });
+
+  for (const piece of pieces) {
+    const dir = await mkdtemp(join(shared.dir, "chunk-"));
+    try {
+      // Work around a bug in msedge-tts: when a chunk comes back with no
+      // boundary metadata, its error path calls `unlinkSync` on a file it never
+      // wrote. That throws ENOENT from inside a stream handler, where nothing
+      // can catch it, and the exception takes the whole server process down.
+      // Creating the file first makes that unlink a harmless no-op.
+      const metadataPath = join(dir, "metadata.json");
+      await writeFile(metadataPath, "").catch(() => {});
+
+      const { audioFilePath, metadataFilePath } = await withTimeout(
+        shared.tts.toFile(`${dir}/`, piece, effectiveProsody),
+        CHUNK_TIMEOUT_MS,
+        "Tổng hợp giọng nói",
+      );
+      const audio = new Uint8Array(await readFile(audioFilePath));
+      if (metadataFilePath) {
+        for (const mark of await readWordMarks(metadataFilePath)) {
+          words.push({
+            start: mark.start + timelineOffset,
+            end: mark.end + timelineOffset,
+            text: mark.text,
+          });
+        }
+      }
+      buffers.push(audio);
+      timelineOffset += mp3DurationSeconds(audio);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  const total = buffers.reduce((sum, b) => sum + b.length, 0);
+  const audio = new Uint8Array(total);
+  let offset = 0;
+  for (const b of buffers) {
+    audio.set(b, offset);
+    offset += b.length;
+  }
+  return { audio, words };
+}
+
+export interface SpeakResult {
+  audio: Uint8Array;
+  voice: LessonVoiceId;
+  chunks: number;
+  /** Per-word timings, empty when the service sent no boundary metadata. */
+  words: WordMark[];
+  /** Which engine produced these bytes. */
+  engine: TtsEngine;
+  /**
+   * MP3 unless the machine has no ffmpeg, in which case the local engine hands
+   * back the WAV Piper produced. Both play in a browser; only the size differs.
+   */
+  contentType: "audio/mpeg" | "audio/wav";
+  /**
+   * Set when the chosen engine could not do it and the other one did.
+   *
+   * A silent fallback would be the wrong call: a teacher who chose the machine's
+   * own voice and hears the service's is looking at a setting that says
+   * otherwise. So the engine that actually spoke travels with the audio, and the
+   * studio says so once.
+   */
+  notice?: string;
+}
+
+const MAX_ATTEMPTS = 3;
+
+/**
+ * Teaching pace, applied once to whatever the engine produced.
+ *
+ * Measured October 2026 on one 55-word Vietnamese narration: Edge 11.3-12.5s,
+ * Piper 11.4s, VieNeu Nano 11.1s — about 4.7 words a second whichever engine
+ * reads it. That is speed-listening, not teaching; a lecturer with a slide
+ * projecter lands near 3.5.
+ *
+ * Every engine's own tempo knob was tried first and none of them delivered:
+ * Edge's SSML rate moved the same line by under 3%, Piper's `length_scale` is
+ * exact, VieNeu's `--speed` slower — yet through the API all three came back
+ * within 5% of before. Post-processing is the one knob that is guaranteed to
+ * mean what it says, because it is applied to finished audio.
+ *
+ * `atempo` and not `asetrate`/`rubberband`: it stretches time without moving
+ * pitch, so the voice is the voice the teacher picked, only unhurried. Anything
+ * under 0.5 needs a chain, hence the guard.
+ */
+const TEACHING_TEMPO = 1.0;
+
+/**
+ * Stretches a finished narration, and its word timings with it.
+ *
+ * Karaoke timings come from the same clock as the audio, so slowing the audio
+ * without slowing the marks would leave every subtitle highlight arriving early.
+ * A machine with no ffmpeg keeps the unslowed bytes rather than failing the
+ * read: fast narration is a lesser fault than no narration.
+ */
+async function atTeachingPace(result: SpeakResult): Promise<SpeakResult> {
+  if ((TEACHING_TEMPO >= 0.99 && TEACHING_TEMPO <= 1.01) || TEACHING_TEMPO <= 0.5 || result.audio.length === 0) {
+    return result;
+  }
+  const dir = await mkdtemp(join(tmpdir(), TEMP_DIR_PREFIX));
+  const isMp3 = result.contentType === "audio/mpeg";
+  const src = join(dir, isMp3 ? "in.mp3" : "in.wav");
+  const out = join(dir, isMp3 ? "out.mp3" : "out.wav");
+  try {
+    await writeFile(src, result.audio);
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-loglevel",
+      "error",
+      "-i",
+      src,
+      "-filter:a",
+      `atempo=${TEACHING_TEMPO}`,
+      ...(isMp3 ? ["-codec:a", "libmp3lame", "-b:a", "96k"] : []),
+      out,
+    ]);
+    const audio = await readFile(out);
+    if (audio.length === 0) return result;
+    return {
+      ...result,
+      audio: new Uint8Array(audio),
+      words: result.words.map((mark) => ({
+        ...mark,
+        start: mark.start / TEACHING_TEMPO,
+        end: mark.end / TEACHING_TEMPO,
+      })),
+    };
+  } catch {
+    return result;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+const execFileAsync = promisify(execFile);
+
+/** The hosted voice service: many voices, and per-word timings it measures. */
+export async function speakCloud(text: string, voice: LessonVoiceId): Promise<SpeakResult> {
+  const pieces = splitForSpeech(text);
+  if (pieces.length === 0) throw new Error("Không có chữ để đọc.");
+
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const { audio, words } = await withConnection(() => synthesizeOnce(pieces, voice));
+      return { audio, voice, chunks: pieces.length, words, engine: "cloud", contentType: "audio/mpeg" };
+    } catch (error) {
+      lastError = error;
+      // A dropped socket stays dropped; the next attempt needs a new one.
+      await closeConnection(shared);
+      if (attempt === MAX_ATTEMPTS || !isRetryable(error)) break;
+      await new Promise((r) => setTimeout(r, 600 * attempt));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("TTS thất bại");
+}
+
+/**
+ * Speaks a narration with whichever engine the teacher chose.
+ *
+ * Local is the default and the one that cannot fail for a reason nobody can fix,
+ * so it goes first. When it is not ready — no Python, no voice downloaded, a
+ * machine that has never been set up — the service reads the line instead and the
+ * result carries a notice saying so. When both fail, the local reason is the one
+ * worth reading: it is the one the teacher can act on.
+ */
+export async function speak(text: string, voice: LessonVoiceId): Promise<SpeakResult> {
+  return atTeachingPace(await speakAtEnginePace(text, voice));
+}
+
+/**
+ * The engine's own pace, untouched. `speak` is the only door; this is behind it.
+ */
+async function speakAtEnginePace(text: string, voice: LessonVoiceId): Promise<SpeakResult> {
+  // A voice id that names a local engine speaks with that engine whatever the
+  // engine setting says: the teacher picked a person, not a machine.
+  const named = await localVoiceFor(voice);
+  if (named) return speakNamedLocalVoice(text, voice, named);
+
+  const engine = await readTtsEngine();
+  if (engine === "cloud") return speakCloud(text, voice);
+
+  try {
+    const local = await speakLocal(text, voice);
+    return {
+      audio: local.audio,
+      voice,
+      chunks: local.chunks,
+      words: local.words,
+      engine: "local",
+      contentType: local.contentType,
+    };
+  } catch (localError) {
+    const reason = localError instanceof Error ? localError.message : String(localError);
+    try {
+      const cloud = await speakCloud(text, voice);
+      return { ...cloud, notice: `Giọng trên máy chưa dùng được (${reason}). Đã đọc bằng API.` };
+    } catch (cloudError) {
+      const detail = cloudError instanceof Error ? cloudError.message : String(cloudError);
+      throw new Error(`${reason} · API cũng không đọc được: ${detail}`);
+    }
+  }
+}
+
+/**
+ * Speaks with the engine a voice id names, and falls back to the service.
+ *
+ * The fallback voice is an Edge one because the service only knows its own names:
+ * handing it `vieneu:Hải Đăng` would fail for a reason that has nothing to do
+ * with the network. The chosen engine travels with the audio and the notice says
+ * which voice actually read the line.
+ */
+async function speakNamedLocalVoice(
+  text: string,
+  voice: LessonVoiceId,
+  option: LocalVoiceOption,
+): Promise<SpeakResult> {
+  try {
+    const local = await speakLocalProvider(text, option);
+    return {
+      audio: local.audio,
+      voice,
+      chunks: local.chunks,
+      words: local.words,
+      engine: "local",
+      contentType: local.contentType,
+    };
+  } catch (localError) {
+    const reason = localError instanceof Error ? localError.message : String(localError);
+    try {
+      const cloud = await speakCloud(text, voiceForLanguage("vi"));
+      return { ...cloud, voice, notice: `Giọng ${option.label} chưa dùng được (${reason}). Đã đọc bằng API.` };
+    } catch (cloudError) {
+      const detail = cloudError instanceof Error ? cloudError.message : String(cloudError);
+      throw new Error(`${reason} · API cũng không đọc được: ${detail}`);
+    }
+  }
+}

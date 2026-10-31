@@ -1,0 +1,1672 @@
+import fs from "node:fs";
+import path from "node:path";
+import katex from "katex";
+import { sceneKindLabel, type Lesson } from "./types";
+import { type AlignedSentence } from "@/lib/karaoke";
+import { inlineHtml, cleanLatex } from "./inline";
+import { pollinationsImageUrl } from "./pollinations";
+import { cleanQuizExplanation } from "./quiz";
+import {
+  isDarkTheme,
+  resolveSlideTheme,
+  type SlidePalette,
+} from "./themes";
+
+/**
+ * Builds a standalone, self-contained HTML "player" for one lesson — one file,
+ * timeline and all, with no server involved, and scrubbable in both directions
+ * out of the box.
+ *
+ * The slide and the subtitle are the web player's, not a lookalike: same type
+ * ladder in `cqw` against the same 16:9 box, same hairline bullets, same
+ * two-row caption with the sentence being spoken over the one coming next, and
+ * the same three word states. A download that only resembled the page it came
+ * from was a second renderer to keep in step with the first, and it drifted.
+ *
+ * GSAP is loaded from a CDN, so the file needs internet on first open; the
+ * lesson data itself is embedded inline.
+ */
+const CSS = `
+:root, html[data-theme="dark"]{color-scheme:dark;--ink:#09090b;--ink2:#121215;--ink3:#18181b;--line:#27272a;--mist:#ffffff;--mist3:#d4d4d8;--mist5:#a1a1aa;--brand:#0284c7;--brand3:#38bdf8;--brand7:#0369a1;--gold:#f59e0b;--gold3:#fbbf24;--ember:#f97316;--stage-shadow:0 28px 60px -34px rgba(0,0,0,.85);--player-bg:rgba(18,18,21,.92)}
+html[data-theme="light"]{color-scheme:light;--ink:#f8fafc;--ink2:#ffffff;--ink3:#f1f5f9;--line:#cbd5e1;--mist:#09090b;--mist3:#1e293b;--mist5:#475569;--brand:#0284c7;--brand3:#0369a1;--brand7:#0c4a6e;--gold:#d97706;--gold3:#b45309;--ember:#ea580c;--stage-shadow:0 20px 45px -20px rgba(0,0,0,.12);--player-bg:rgba(255,255,255,.96)}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ink);color:var(--mist);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;transition:background .2s ease,color .2s ease}
+body{background-image:radial-gradient(50rem 32rem at 12% -8%,color-mix(in srgb,var(--brand) 12%,transparent) 0%,transparent 65%),radial-gradient(40rem 28rem at 92% 2%,color-mix(in srgb,var(--gold) 10%,transparent) 0%,transparent 60%)}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 64px}
+.head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.head-left{display:flex;flex-direction:column;gap:8px}
+.head-tags{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.head h1{margin:0;font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--mist)}
+.tag{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--mist3);background:var(--ink2);box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.mono{font-family:ui-monospace,Consolas,monospace}
+.theme-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--ink2);color:var(--mist);border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s ease;box-shadow:0 1px 3px rgba(0,0,0,.06);user-select:none}
+.theme-btn:hover{border-color:var(--brand);color:var(--brand);background:var(--ink3)}
+.theme-btn svg{width:15px;height:15px;flex-shrink:0}
+html[data-theme="dark"] .icon-sun,html[data-theme="dark"] .theme-txt-light{display:inline-flex}
+html[data-theme="dark"] .icon-moon,html[data-theme="dark"] .theme-txt-dark{display:none}
+html[data-theme="light"] .icon-sun,html[data-theme="light"] .theme-txt-light{display:none}
+html[data-theme="light"] .icon-moon,html[data-theme="light"] .theme-txt-dark{display:inline-flex}
+
+/* The slide box. container-type is what lets everything inside measure its
+   type in cqw against this box, so the sizes below are the same numbers the
+   web player's stylesheet uses rather than a fresh guess at "about right". */
+.stage{position:relative;aspect-ratio:16/9;container-type:inline-size;background:var(--ink2);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:var(--stage-shadow);transition:background .2s ease,border-color .2s ease}
+.scene{position:absolute;inset:0;opacity:0;visibility:hidden}
+.card{--slide-fit:1;position:absolute;inset:0;display:flex;flex-direction:column;justify-content:safe center;padding:3.4cqw 5.5cqw 9cqw;overflow:hidden;background-image:linear-gradient(180deg,var(--ink2) 0%,var(--ink2) 60%,var(--ink3) 100%)}
+.wash{position:absolute;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(120% 90% at 88% -10%,color-mix(in srgb,var(--brand) 12%,transparent) 0%,transparent 62%),radial-gradient(90% 80% at 8% 108%,color-mix(in srgb,var(--gold) 8%,transparent) 0%,transparent 60%)}
+/* Same five patterns as the web player, drawn with the export's own accent
+   roles (remapped to the lesson paper in themeCss), so a downloaded deck
+   keeps the backdrop its teacher picked. */
+.card[data-pattern="dots"] .wash{background:radial-gradient(color-mix(in srgb,var(--brand3) 30%,transparent) 1.2px,transparent 1.3px),radial-gradient(120% 90% at 88% -10%,color-mix(in srgb,var(--brand3) 16%,transparent) 0%,transparent 62%);background-size:2.6cqw 2.6cqw,auto}
+.card[data-pattern="grid"] .wash{background:linear-gradient(color-mix(in srgb,var(--line) 55%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--line) 55%,transparent) 1px,transparent 1px),radial-gradient(120% 90% at 88% -10%,color-mix(in srgb,var(--brand3) 16%,transparent) 0%,transparent 62%);background-size:100% 3cqw,3cqw 100%,auto}
+.card[data-pattern="bands"] .wash{background:linear-gradient(135deg,transparent 58%,color-mix(in srgb,var(--brand) 16%,transparent) 58%,color-mix(in srgb,var(--brand) 16%,transparent) 74%,color-mix(in srgb,var(--brand3) 26%,transparent) 74%),radial-gradient(120% 90% at 88% -10%,color-mix(in srgb,var(--brand3) 16%,transparent) 0%,transparent 62%)}
+.card[data-pattern="rings"] .wash{background:repeating-radial-gradient(circle at 88% 6%,transparent 0,transparent 3.1cqw,color-mix(in srgb,var(--brand3) 22%,transparent) 3.1cqw,color-mix(in srgb,var(--brand3) 22%,transparent) 3.25cqw),radial-gradient(120% 90% at 88% -10%,color-mix(in srgb,var(--brand3) 16%,transparent) 0%,transparent 62%)}
+.card[data-pattern="waves"] .wash{background:radial-gradient(55% 48% at 10% 102%,color-mix(in srgb,var(--brand) 14%,transparent) 0%,transparent 70%),radial-gradient(48% 42% at 92% 4%,color-mix(in srgb,var(--brand3) 18%,transparent) 0%,transparent 70%),radial-gradient(120% 90% at 88% -10%,color-mix(in srgb,var(--brand3) 16%,transparent) 0%,transparent 62%)}
+.wm{position:absolute;right:6%;bottom:4%;z-index:3;font-family:ui-monospace,monospace;font-size:1.6cqw;font-weight:700;color:color-mix(in srgb,var(--mist5) 70%,transparent)}
+/* The column the fit pass measures: capped at the paper, so nothing spills into
+   the caption strip, with the picture as the one thing allowed to give way. */
+.fit{position:relative;z-index:2;display:flex;flex-direction:column;gap:1.1cqw;flex-shrink:0;max-height:100%;min-height:0}
+.head-in{width:100%;max-width:86%}
+.kicker{display:inline-flex;align-items:center;gap:.6cqw;font-size:calc(1.05cqw * var(--slide-fit));font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--brand)}
+.title{margin:2.5% 0 0;font-size:calc(5.2cqw * var(--slide-fit));line-height:1.04;letter-spacing:-.03em;font-weight:800;color:var(--mist);text-wrap:balance}
+.sub{margin:2% 0 0;font-size:calc(1.7cqw * var(--slide-fit));color:var(--mist3);line-height:1.4}
+.rule{border:0;border-top:1px solid var(--line);width:22%;margin:3% 0 0}
+
+/* Hairlines, not filled cards: one alignment for the eye and none of the visual
+   weight, which is what keeps a long list looking designed. */
+.body{display:grid;width:100%;max-width:86%;gap:0 6%;grid-template-columns:1fr;margin:0;padding:0;list-style:none}
+@container (min-width:620px){.body{grid-template-columns:1fr 1fr}}
+.body li{display:flex;align-items:baseline;gap:1.5cqw;font-size:calc(1.4cqw * var(--slide-fit));line-height:1.62;padding:.75cqw 0;border-top:1px solid var(--line);color:var(--mist3)}
+.body .bi{font-family:ui-monospace,monospace;font-size:.8em;font-weight:800;color:var(--brand);flex:0 0 auto}
+.body li>span:last-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden}
+.inline-code{font-family:ui-monospace,monospace;font-size:.92em;padding:0 .3em;border-radius:.3em;background:color-mix(in srgb,var(--mist) 8%,transparent)}
+.formula{margin:0;width:fit-content;border:1px solid color-mix(in srgb,var(--gold) 45%,transparent);background:color-mix(in srgb,var(--gold) 10%,transparent);color:var(--gold);border-radius:12px;padding:12px 16px;font-family:ui-monospace,monospace;font-size:calc(2cqw * var(--slide-fit));font-weight:700}
+/* The quiz prints like an answer key: nobody can click in a downloaded file,
+   so the right option is marked and the explanation sits under its question.
+   The bank scrolls — a 20-question final can be taller than the paper. */
+.quiz{display:grid;width:100%;max-width:86%;gap:1.4cqw;margin:0;max-height:36cqw;overflow:auto}
+.quiz-q{margin:0}
+.quiz-qt{margin:0;font-size:calc(1.5cqw * var(--slide-fit));line-height:1.45;font-weight:700;color:var(--mist)}
+.quiz-n{font-family:ui-monospace,monospace;font-size:.82em;font-weight:700;color:var(--brand);margin-right:1.2cqw}
+.quiz-opts{margin:.6cqw 0 0;padding:0;list-style:none;display:grid;gap:.35cqw}
+.quiz-opts li{display:flex;align-items:baseline;gap:1.2cqw;font-size:calc(1.3cqw * var(--slide-fit));line-height:1.5;padding:.5cqw .9cqw;border:1px solid var(--line);border-radius:.6cqw;color:var(--mist3)}
+.quiz-opts li[data-correct="true"]{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 65%,transparent);background:color-mix(in srgb,var(--brand) 12%,transparent);font-weight:700}
+.quiz-exp{margin:.5cqw 0 0;font-size:calc(1.15cqw * var(--slide-fit));line-height:1.5;color:var(--mist5)}
+/* The recap map, in the same two columns the player uses once the paper is
+   wide enough to hold them. */
+.mm{display:grid;width:100%;max-width:86%;gap:1.2cqw 4%;grid-template-columns:1fr;margin:0}
+@container (min-width:620px){.mm{grid-template-columns:1fr 1fr}}
+.mm-branch{margin:0}
+.mm-label{margin:0;font-size:calc(1.3cqw * var(--slide-fit));font-weight:700;color:var(--brand)}
+.mm-branch ul{margin:.35cqw 0 0;padding:0;list-style:none;display:grid;gap:.2cqw}
+.mm-branch li{font-size:calc(1.2cqw * var(--slide-fit));line-height:1.45;color:var(--mist3)}
+/* The picture, under the words and under the caption: a photograph that covered
+   the line being read was worse than no photograph at all. */
+.fig{position:relative;z-index:1;margin:0;display:flex;flex-direction:column;align-items:center;flex:0 1 auto;min-height:0}
+.fig img{max-width:78%;max-height:calc(30cqw * var(--slide-fit));width:auto;height:auto;margin-inline:auto;border-radius:1.2cqw;border:1px solid var(--line);cursor:zoom-in;background:var(--ink3);object-fit:contain}
+.fig figcaption{margin-top:.5cqw;font-size:calc(1cqw * var(--slide-fit));color:var(--mist5)}
+.fig.gone{display:none}
+/* A crowded slide keeps a small picture before it keeps none; a slide with no
+   room at all keeps its words and loses the picture. Both set by the fit pass. */
+.card[data-small-figure] .fig img{max-height:calc(14cqw * var(--slide-fit))}
+.card[data-no-figure] .fig{display:none}
+
+/* The caption: two rows held open at all times, the sentence being spoken over
+   the one coming next. Reserving both rows is the point — a caption whose height
+   changes when the hand-over happens moves every line on screen, and the reader
+   feels it as a stutter at the exact moment they are following the voice. */
+.cap{position:absolute;left:5%;right:5%;bottom:2.2cqw;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;pointer-events:none;text-align:center}
+.sent{position:relative;margin:0;font-size:1.65cqw;line-height:1.34;font-weight:600;letter-spacing:.005em;color:var(--mist);display:none;text-align:center;transition:opacity .16s linear}
+.sent[data-row="live"]{display:block;opacity:1}
+.sent[data-row="next"]{display:block;opacity:.6;color:var(--mist5);margin-top:.4cqw}
+.sent .w{padding:0 1px;transition:color 90ms linear}
+.sent .w[data-state="idle"]{color:var(--mist5)}
+.sent .w[data-state="said"]{color:var(--mist3)}
+.sent .w[data-state="now"]{color:var(--brand);font-weight:800}
+.cap-plain{position:relative;margin:0;font-size:1.65cqw;line-height:1.34;font-weight:500;color:var(--mist3);text-align:center}
+.bar{position:absolute;left:0;bottom:0;height:3px;width:100%;transform:scaleX(0);transform-origin:left center;background:linear-gradient(90deg,var(--brand),var(--gold3))}
+
+/* Click a picture to read it: a downloaded file has no player to go back to, so
+   the zoom is the only way to see the detail the slide was pointing at. */
+.zoom{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(4,9,11,.86);backdrop-filter:blur(2px)}
+.zoom.on{display:flex}
+.zoom img{max-width:96vw;max-height:88vh;border-radius:14px;border:1px solid var(--line)}
+.zoom-x{position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:999px;border:1px solid var(--line);background:var(--ink2);color:var(--mist);font:inherit;font-size:20px;line-height:1;cursor:pointer}
+.zoom-x:hover{border-color:var(--brand);color:var(--brand3)}
+
+/* The player bar, laid out the way a player lays one out: the timeline spans
+   the full width directly above the buttons, the clock sits in the same row as
+   the transport, and volume, speed and the shortcut list are on the right. A row
+   of evenly spaced buttons in a black strip is a toolbar, and a toolbar spends
+   the width that a player spends on the one control people reach for. */
+.player{margin-top:14px;border:1px solid var(--line);background:var(--player-bg);border-radius:18px;padding:14px 16px 12px;backdrop-filter:blur(8px);box-shadow:0 4px 20px rgba(0,0,0,.04);transition:background .2s ease,border-color .2s ease}
+.scrubwrap{position:relative;padding-top:26px}
+.hovertime{position:absolute;top:0;left:0;transform:translateX(-50%);border:1px solid var(--line);background:var(--ink2);border-radius:6px;padding:1px 6px;font-family:ui-monospace,monospace;font-size:11px;color:var(--mist);opacity:0;pointer-events:none;transition:opacity .1s}
+.hovertime[data-visible="true"]{opacity:1}
+.scrub{position:relative;height:44px;touch-action:none;user-select:none;cursor:pointer;outline:none}
+.scrub[data-dragging="true"]{cursor:grabbing}
+.scrub:focus-visible .rail{box-shadow:0 0 0 2px color-mix(in srgb,var(--brand) 55%,transparent)}
+.chapterband{position:absolute;left:0;right:0;top:0;height:16px}
+.chapter{position:absolute;top:0;height:16px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-left:1px solid color-mix(in srgb,var(--brand) 70%,transparent);padding-left:6px;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mist5)}
+.chapter[data-state="passed"]{color:var(--mist3)}
+.chapter[data-state="current"]{color:var(--brand)}
+.rail{position:absolute;left:0;right:0;bottom:12px;height:10px;border-radius:999px;background:var(--ink3);border:1px solid var(--line);overflow:hidden}
+.fill{position:absolute;top:0;bottom:0;left:0;width:0;background:linear-gradient(90deg,var(--brand),var(--brand3))}
+.loopregion{position:absolute;bottom:10px;height:14px;border-radius:3px;border-left:2px solid;border-right:2px solid;pointer-events:none}
+.loopregion[data-on="true"]{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 30%,transparent)}
+.loopregion[data-on="false"]{border-color:var(--mist5);background:color-mix(in srgb,var(--mist5) 15%,transparent)}
+.tick{position:absolute;bottom:12px;width:1px;height:10px;background:var(--line)}
+.handle{position:absolute;bottom:6px;width:20px;height:20px;margin-left:-10px;border-radius:999px;background:var(--brand);border:2px solid var(--ink);box-shadow:0 4px 12px rgba(0,0,0,.3);transition:transform .12s}
+.scrub:hover .handle,.scrub[data-dragging="true"] .handle{transform:scale(1.12)}
+.scrubfoot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;font-family:ui-monospace,monospace;font-size:11px;color:var(--mist5)}
+.transport{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+.tbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:36px;height:36px;border-radius:10px;padding:0;font:inherit;color:var(--mist3);background:transparent;border:1px solid transparent;cursor:pointer;transition:all .15s ease}
+.tbtn:hover{color:var(--mist);background:var(--ink3);border-color:var(--line)}
+.tbtn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tbtn svg[data-fill="1"]{fill:currentColor;stroke:none}
+.tplay{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:12px;border:0;background:var(--brand);color:#ffffff;cursor:pointer;transition:background .15s ease}
+.tplay:hover{background:var(--brand3)}
+.tplay svg{width:21px;height:21px;fill:currentColor;stroke:none}
+.tsep{width:1px;height:28px;background:var(--line)}
+.clock{border:1px solid var(--line);background:var(--ink2);border-radius:8px;padding:6px 10px;font-family:ui-monospace,monospace;font-size:12px;font-weight:700;color:var(--brand);white-space:nowrap}
+.loopbox{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--ink3);border-radius:12px;padding:4px}
+.loopbox .tbtn{width:auto;height:28px;padding:0 8px;font-size:12px;font-weight:600}
+.loopbox .tbtn[aria-pressed="true"]{background:var(--gold);color:#09090b;font-weight:700}
+.ab{height:28px;border:0;border-radius:8px;padding:0 8px;font-family:ui-monospace,monospace;font-size:12px;color:var(--mist3);background:transparent;cursor:pointer}
+.ab:hover{color:var(--mist);background:var(--ink3)}
+.clearbtn{height:28px;border:0;border-radius:8px;padding:0 8px;font:inherit;font-size:12px;color:var(--mist5);background:transparent;cursor:pointer}
+.clearbtn:hover{color:var(--ember)}
+.rate{border:1px solid var(--line);background:var(--ink2);border-radius:8px;padding:6px 8px;font-family:ui-monospace,monospace;font-size:12px;color:var(--mist);cursor:pointer}
+.volrow{display:flex;align-items:center;gap:6px;margin-left:auto}
+input[type=range]{-webkit-appearance:none;appearance:none;width:84px;height:22px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:var(--ink3);border:1px solid var(--line)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border-radius:999px;background:var(--brand);border:2px solid var(--ink)}
+input[type=range]::-moz-range-track{height:6px;border-radius:999px;background:var(--ink3)}
+input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:999px;background:var(--brand);border:2px solid var(--ink)}
+.chapterlist{display:flex;flex-direction:column;gap:4px;margin-top:12px;max-height:170px;overflow-y:auto}
+.mark{display:flex;align-items:baseline;justify-content:space-between;gap:10px;width:100%;text-align:left;font:inherit;font-size:12px;color:var(--mist3);background:transparent;border:0;border-left:2px solid var(--line);border-radius:0;padding:5px 10px;cursor:pointer;transition:all .15s ease}
+.mark:hover{color:var(--brand);border-left-color:var(--brand);background:color-mix(in srgb,var(--brand) 6%,transparent)}
+.mark[data-current="true"]{color:var(--mist);border-left-color:var(--brand);font-weight:700;background:color-mix(in srgb,var(--brand) 10%,transparent)}
+.mark .at{font-family:ui-monospace,monospace;font-size:11px;color:var(--mist5)}
+.hint{color:var(--mist5);font-size:11px;margin-top:10px;font-family:ui-monospace,monospace}
+/* Fullscreen takes the whole page, slide and transport together: the browser
+   owns the screen, and a presenter who cannot reach the play button has no
+   controls at all. */
+/* Fullscreen is the web player's fullscreen, not a long page: the slide owns
+   the screen at its own 16:9 with the letterbox around it, and the transport
+   rides over the bottom of the slide and gets out of the way, exactly like
+   FullscreenControls does on /lesson. A downloaded deck that grew a separate
+   media player under its slide was a second design to look after. */
+.wrap:fullscreen{position:relative;display:flex;align-items:center;justify-content:center;background:var(--ink);padding:0;overflow:hidden}
+.wrap:fullscreen .head,.wrap:fullscreen .hint{display:none}
+.wrap:fullscreen .stage{width:min(100vw,calc(100vh * 16 / 9));border:0;border-radius:0;box-shadow:none}
+/* One dark sheet, the web player's gradient rather than a translucent card: a
+   see-through bar over a pale slide washes the buttons out to unreadable. */
+.wrap:fullscreen .player{position:absolute;left:0;right:0;bottom:0;z-index:5;margin:0;border:0;border-radius:0;padding:22px 16px 10px;background:linear-gradient(to top,rgba(0,0,0,.94),rgba(0,0,0,.74) 46%,rgba(0,0,0,.28));transition:opacity .3s}
+.wrap:fullscreen .player[data-idle="true"]{opacity:0;pointer-events:none}
+/* The deck's structure is on the slide and in the chapter list; over a slide it
+   is just three more rows eating the picture. */
+.wrap:fullscreen .chapterband,.wrap:fullscreen .scrubfoot,.wrap:fullscreen .chapterlist,.wrap:fullscreen .loopbox{display:none}
+.wrap:fullscreen .scrubwrap{padding-top:0}
+@media (prefers-reduced-motion:reduce){.wrap:fullscreen .player{transition:none}}
+
+/* The shortcut sheet, opened with \`?\`. Every key here is bound below, so the
+   list cannot drift away from what the file actually does. */
+.dlg{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:16px;background:color-mix(in srgb,var(--ink) 82%,transparent);backdrop-filter:blur(4px)}
+.dlg.on{display:flex}
+.dlg-panel{width:100%;max-width:780px;max-height:85vh;overflow-y:auto;border:1px solid var(--line);background:var(--ink2);border-radius:16px;padding:20px}
+.dlg-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.dlg-head h2{margin:0;font-size:17px}
+.dlg-head p{margin:4px 0 0;font-size:13px;color:var(--mist5)}
+.dlg-grid{display:grid;gap:20px;margin-top:18px}
+@media (min-width:640px){.dlg-grid{grid-template-columns:1fr 1fr}}
+.dlg-grid h3{margin:0 0 8px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--brand3)}
+.dlg-grid ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.dlg-grid li{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);background:color-mix(in srgb,var(--ink3) 60%,transparent);border-radius:9px;padding:7px 10px}
+.kbd{font-family:ui-monospace,monospace;font-size:11px;white-space:nowrap}
+.dlg-grid li .what{font-size:12px;color:var(--mist3);text-align:right}
+@media (prefers-reduced-motion:reduce){.sent,.sent .w,.handle{transition:none}}
+`;
+
+/**
+ * Recolours the generic player chrome with the lesson's own paper.
+ *
+ * The web player reads every colour through the slide's palette, so a deck on
+ * "Giấy kem" is light and a deck on "Mực tàu" is dark. The standalone file used
+ * to ignore that and always ship the dark look, which is why a download never
+ * resembled the web page. Redefining the same variables keeps the layout
+ * untouched while the whole page — paper, wash, controls, buttons, caption —
+ * follows the chosen preset.
+ */
+function themeCss(palette: SlidePalette, dark: boolean): string {
+  const p = palette;
+  return (
+    `\n/* Lesson custom accents */\n` +
+    `.formula{border-color:color-mix(in srgb,var(--gold) 45%,transparent);background:color-mix(in srgb,var(--gold) 10%,transparent)}\n`
+  );
+}
+
+/**
+ * The transport icons, drawn inline.
+ *
+ * A downloaded file has no bundler and no icon package, and the alternative —
+ * text buttons — is the toolbar this bar exists to stop being. These are the
+ * same shapes the web player's bar uses, so a teacher moves between the two
+ * without re-learning the row.
+ */
+const ICON = {
+  toStart: '<polygon points="19 20 9 12 19 4 19 20"/><line x1="5" x2="5" y1="19" y2="5"/>',
+  back10:
+    '<polygon points="11 19 2 12 11 5 11 19"/><polygon points="22 19 13 12 22 5 22 19"/>',
+  stepBack: '<path d="m15 18-6-6 6-6"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+  stepForward: '<path d="m9 18 6-6-6-6"/>',
+  forward10:
+    '<polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/>',
+  toEnd: '<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/>',
+  repeat:
+    '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  volumeHigh:
+    '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+  volumeLow:
+    '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>',
+  volumeMute:
+    '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/>',
+  keyboard:
+    '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01"/><path d="M8 12h.01"/><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M7 16h10"/>',
+  fullscreen:
+    '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  shrink:
+    '<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>',
+  close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+} as const;
+
+type IconName = keyof typeof ICON;
+
+function icon(name: IconName, filled = false): string {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"${filled ? ' data-fill="1"' : ""}>${ICON[name]}</svg>`;
+}
+
+/** A labelled icon button, the way the transport bar is built. */
+function toolButton(
+  id: string,
+  label: string,
+  title: string,
+  name: IconName,
+  extra = "",
+): string {
+  return (
+    `<button type="button" class="tbtn" id="${id}" title="${escapeHtml(title)}"` +
+    ` aria-label="${escapeHtml(label)}"${extra}>${icon(name)}</button>`
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * KaTeX stylesheet inlined into the standalone file, read once from the
+ * installed package. The web player gets it through its CSS bundle; the export
+ * has no bundle, so it carries the text. Font files are referenced by relative
+ * URL and will not resolve next to a downloaded file — the layout still holds
+ * on fallback fonts, only the glyph shapes differ.
+ */
+let cachedKatexCss: string | null = null;
+function katexCss(): string {
+  if (cachedKatexCss !== null) return cachedKatexCss;
+  try {
+    cachedKatexCss = fs.readFileSync(
+      path.join(process.cwd(), "node_modules", "katex", "dist", "katex.min.css"),
+      "utf8",
+    );
+  } catch {
+    cachedKatexCss = "";
+  }
+  return cachedKatexCss;
+}
+
+/**
+ * Renders one scene's formula with the same KaTeX options the web player uses
+ * (`SceneFigure`). A formula KaTeX rejects falls back to escaped raw text —
+ * identical to the web behaviour, so the two never disagree about a scene.
+ */
+function formulaMarkup(formula: string): string {
+  let inner: string;
+  try {
+    inner = katex.renderToString(cleanLatex(formula), {
+      displayMode: true,
+      throwOnError: false,
+      strict: false,
+      trust: false,
+      output: "htmlAndMathml",
+    });
+  } catch {
+    inner = escapeHtml(formula);
+  }
+  return `<p class="formula">${inner}</p>`;
+}
+
+/**
+ * Renders one scene's narration as the web player's caption: every sentence in
+ * the file, each word carrying its speaking window, and the script below showing
+ * the sentence being spoken over the one coming next.
+ *
+ * Every sentence is written out rather than only the current one because this
+ * file has no state to rebuild DOM from — the whole point is that it scrubs
+ * backwards. The rows are placed by the script; a scene with no timings at all
+ * (a voice that failed, an alignment the coverage check rejected) falls back to
+ * the plain paragraph, because a caption that can never light up is worse than
+ * the text it was hiding.
+ */
+function narrationMarkup(narration: string, sentences: AlignedSentence[]): string {
+  if (sentences.length === 0) {
+    return `<div class="cap"><p class="cap-plain">${escapeHtml(narration)}</p></div>`;
+  }
+  let lastStart = 0;
+  const inner = sentences
+    .map((sentence, index) => {
+      const start = sentence.start ?? lastStart;
+      lastStart = start;
+      const words = sentence.tokens
+        .map((token) => {
+          const text = escapeHtml(token.text);
+          if (token.start === null || token.end === null) {
+            return `<span class="w" data-state="idle">${text}</span>`;
+          }
+          return `<span class="w" data-state="idle" data-s="${token.start.toFixed(3)}">${text}</span>`;
+        })
+        .join("");
+      return `<p class="sent" data-row="off" data-sent="${index}" data-start="${start.toFixed(3)}">${words}</p>`;
+    })
+    .join("");
+  return `<div class="cap">${inner}</div>`;
+}
+
+/**
+ * The slide's own picture, asked of the same URL the web player asks for.
+ *
+ * The seed is derived from the lesson and the scene id, so the downloaded file
+ * and the web page show the same picture for the same slide. It is a remote URL
+ * on purpose: an archive search would need a server this file does not have, and
+ * a data-URI copy of every picture would multiply the size of the download for
+ * something the fallback chain already covers.
+ */
+function figureMarkup(lesson: Lesson, scene: Lesson["scenes"][number]): string {
+  const prompt = (scene.imagePrompt ?? "").trim();
+  if (prompt.length < 3) return "";
+  const src = pollinationsImageUrl(lesson.id, scene.id, prompt);
+  const isVi = lesson.language === "vi";
+  const caption = isVi
+    ? "Ảnh AI &middot; pollinations.ai &mdash; bấm để phóng to"
+    : "AI Image &middot; pollinations.ai &mdash; click to zoom";
+  return (
+    `<figure class="fig">` +
+    // Remote picture: there is no image pipeline in a downloaded file.
+    // eslint-disable-next-line @next/next/no-img-element
+    `<img src="${escapeHtml(src)}" alt="${escapeHtml(scene.title)}" loading="lazy" referrerpolicy="no-referrer" />` +
+    `<figcaption>${caption}</figcaption>` +
+    `</figure>`
+  );
+}
+
+/** The quiz data a lesson scene can carry, bank or single. */
+type ExportQuiz = NonNullable<Lesson["scenes"][number]["quiz"]>;
+type ExportMindmap = NonNullable<Lesson["scenes"][number]["mindmap"]>;
+
+/**
+ * A quiz in a downloaded file is a worked answer key — there is nothing to
+ * click — so the correct option is marked and the explanation printed under
+ * its question. Both shapes render: the single-question classic and the bank.
+ */
+function quizMarkup(quiz: ExportQuiz): string {
+  const bank: { question: string; options: ExportQuiz["options"] }[] =
+    quiz.questions && quiz.questions.length > 0
+      ? quiz.questions
+      : [{ question: quiz.question, options: quiz.options }];
+  return (
+    `<div class="quiz">` +
+    bank
+      .map((question, questionIndex) => {
+        const options = question.options
+          .map(
+            (option, optionIndex) =>
+              `<li${option.isCorrect ? ` data-correct="true"` : ""}>` +
+              `<span class="bi">${String.fromCharCode(65 + optionIndex)}</span>` +
+              `<span>${inlineHtml(option.text, escapeHtml)}</span></li>`,
+          )
+          .join("");
+        const correctOption = question.options.find((option) => option.isCorrect);
+        const explanation = cleanQuizExplanation(
+          correctOption?.explanation,
+          true,
+          correctOption?.text,
+        );
+        return (
+          `<section class="quiz-q">` +
+          `<p class="quiz-qt"><span class="quiz-n">${
+            bank.length > 1 ? `${questionIndex + 1}/${bank.length}` : "?"
+          }</span>${inlineHtml(question.question, escapeHtml)}</p>` +
+          `<ul class="quiz-opts">${options}</ul>` +
+          (explanation ? `<p class="quiz-exp">${inlineHtml(explanation, escapeHtml)}</p>` : "") +
+          `</section>`
+        );
+      })
+      .join("") +
+    `</div>`
+  );
+}
+
+/** The recap map as printed branches: a label and its lines. */
+function mindmapMarkup(mindmap: ExportMindmap): string {
+  return (
+    `<div class="mm">` +
+    mindmap.branches
+      .map(
+        (branch) =>
+          `<section class="mm-branch">` +
+          `<p class="mm-label">${inlineHtml(branch.label, escapeHtml)}</p>` +
+          (branch.items.length > 0
+            ? `<ul>${branch.items
+                .map((item) => `<li>${inlineHtml(item, escapeHtml)}</li>`)
+                .join("")}</ul>`
+            : "") +
+          `</section>`,
+      )
+      .join("") +
+    `</div>`
+  );
+}
+
+function sceneMarkup(
+  lesson: Lesson,
+  audios: (string | null)[],
+  karaoke: AlignedSentence[][],
+): string {
+  return lesson.scenes
+    .map((scene, index) => {
+      const bullets = scene.bullets
+        .map(
+          (bullet, bulletIndex) =>
+            `<li><span class="bi">${String(bulletIndex + 1).padStart(2, "0")}</span>` +
+            `<span>${inlineHtml(bullet, escapeHtml)}</span></li>`,
+        )
+        .join("");
+      const steps = (scene.steps ?? [])
+        .map(
+          (step, stepIndex) =>
+            `<li><span class="bi">B${stepIndex + 1}</span>` +
+            `<span>${inlineHtml(step, escapeHtml)}</span></li>`,
+        )
+        .join("");
+      const audio = audios[index];
+      return [
+        `<article class="scene" data-scene="${index}">`,
+        audio
+          ? `<audio data-voice preload="auto" src="${audio}"></audio>`
+          : "",
+        `<div class="card" data-pattern="${lesson.pattern && lesson.pattern !== "none" ? escapeHtml(lesson.pattern) : "none"}">`,
+        `<div class="wash"></div>`,
+        `<div class="fit">`,
+        `<header class="head-in">`,
+        `<span class="kicker">${escapeHtml(sceneKindLabel(scene.kind, lesson.language === "vi" ? "vi" : "en"))}</span>`,
+        `<h2 class="title">${inlineHtml(scene.title, escapeHtml)}</h2>`,
+        scene.subtitle ? `<p class="sub">${inlineHtml(scene.subtitle, escapeHtml)}</p>` : "",
+        `<hr class="rule" />`,
+        `</header>`,
+        bullets ? `<ul class="body">${bullets}</ul>` : "",
+        steps ? `<ol class="body">${steps}</ol>` : "",
+        scene.quiz ? quizMarkup(scene.quiz) : "",
+        scene.mindmap ? mindmapMarkup(scene.mindmap) : "",
+        scene.formula ? formulaMarkup(scene.formula) : "",
+        figureMarkup(lesson, scene),
+        `</div>`,
+        scene.narration
+          ? narrationMarkup(scene.narration, karaoke[index] ?? [])
+          : "",
+        `<span class="wm">${String(index + 1).padStart(2, "0")}</span>`,
+        `<div class="bar"></div>`,
+        `</div></article>`,
+      ]
+        .filter(Boolean)
+        .join("");
+    })
+    .join("\n");
+}
+
+/** The rates the speed control steps through, in the web player's order. */
+const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+function percent(value: number, total: number): string {
+  if (!Number.isFinite(total) || total <= 0) return "0%";
+  return `${Math.min(100, Math.max(0, (value / total) * 100))}%`;
+}
+
+/**
+ * The player: a timeline with the deck's structure drawn on it, and the transport
+ * row under it.
+ *
+ * The chapter bands and the scene ticks are written into the file rather than
+ * placed by script, because the deck's own timings are known here — the same
+ * reason the caption's sentences are. Everything that moves with the playhead
+ * (the fill, the handle, the chapter states, the loop region) is set by the
+ * script, so scrubbing never has to rebuild this markup.
+ */
+const STANDALONE_I18N = {
+  vi: {
+    scenes: "cảnh",
+    chapters: "chương",
+    ariaTimeline: "Timeline bài giảng. Kéo để tua, phím mũi tên để tua từng bước",
+    ariaValuetext: "{s} giây",
+    keyHints: "&larr; / &rarr; tua 5s &middot; Shift + &larr;/&rarr; tua 1s &middot; , / . từng khung hình",
+    toStart: "Về đầu",
+    toStartTitle: "Về đầu (Home)",
+    back10: "Tua lui 10 giây",
+    back10Title: "Tua lui 10 giây (J)",
+    stepBack: "Lùi một khung hình",
+    stepBackTitle: "Lùi 1 khung hình (,)",
+    play: "Phát",
+    playTitle: "Phát (Space)",
+    stepForward: "Tiến một khung hình",
+    stepForwardTitle: "Tiến 1 khung hình (.)",
+    forward10: "Tua tới 10 giây",
+    forward10Title: "Tua tới 10 giây (L)",
+    toEnd: "Tới cuối",
+    toEndTitle: "Tới cuối (End)",
+    loopTitle: "Bật/tắt lặp trong khoảng A→B (\\)",
+    loopAria: "Bật/tắt lặp A→B",
+    setATitle: "Đặt mốc A tại vị trí hiện tại ([)",
+    setBTitle: "Đặt mốc B tại vị trí hiện tại (])",
+    clearLoop: "xoá",
+    clearLoopTitle: "Xoá khoảng lặp",
+    speedTitle: "Tốc độ phát (− / + để đổi nhanh)",
+    speedAria: "Tốc độ phát",
+    mute: "Tắt hoặc bật tiếng",
+    muteTitle: "Tắt/bật tiếng (M)",
+    volume: "Âm lượng",
+    volume100: "Âm lượng 100%",
+    help: "Danh sách phím tắt",
+    helpTitle: "Danh sách phím tắt (?)",
+    fullscreen: "Toàn màn hình",
+    fullscreenTitle: "Toàn màn hình (F)",
+    dlgTitle: "Phím tắt trình phát",
+    dlgSubtitle: "Mọi thao tác tua đều hoạt động trên timeline của bài giảng.",
+    dlgClose: "Đóng bảng phím tắt",
+    dlgCloseTitle: "Đóng (Esc)",
+    themeToggle: "Chuyển giao diện Sáng / Tối",
+    themeDark: "Giao diện Tối",
+    themeLight: "Giao diện Sáng",
+    hint: "Toàn bộ bài nằm trong file này. GSAP tải từ CDN nên cần mạng ở lần mở đầu; bài học và giọng đọc thì không.",
+  },
+  en: {
+    scenes: "scenes",
+    chapters: "chapters",
+    ariaTimeline: "Lesson timeline. Drag to scrub, arrow keys to step",
+    ariaValuetext: "{s} seconds",
+    keyHints: "&larr; / &rarr; seek 5s &middot; Shift + &larr;/&rarr; seek 1s &middot; , / . frame by frame",
+    toStart: "Go to start",
+    toStartTitle: "Go to start (Home)",
+    back10: "Back 10 seconds",
+    back10Title: "Back 10 seconds (J)",
+    stepBack: "Back 1 frame",
+    stepBackTitle: "Back 1 frame (,)",
+    play: "Play",
+    playTitle: "Play (Space)",
+    stepForward: "Forward 1 frame",
+    stepForwardTitle: "Forward 1 frame (.)",
+    forward10: "Forward 10 seconds",
+    forward10Title: "Forward 10 seconds (L)",
+    toEnd: "Go to end",
+    toEndTitle: "Go to end (End)",
+    loopTitle: "Turn A→B loop on/off (\\)",
+    loopAria: "Turn A→B loop on/off",
+    setATitle: "Set marker A at current position ([)",
+    setBTitle: "Set marker B at current position (])",
+    clearLoop: "clear",
+    clearLoopTitle: "Clear loop range",
+    speedTitle: "Playback speed (− / + to change fast)",
+    speedAria: "Playback speed",
+    mute: "Mute or unmute",
+    muteTitle: "Mute/unmute (M)",
+    volume: "Volume",
+    volume100: "Volume 100%",
+    help: "Keyboard shortcuts",
+    helpTitle: "Keyboard shortcuts (?)",
+    fullscreen: "Fullscreen",
+    fullscreenTitle: "Fullscreen (F)",
+    dlgTitle: "Player keyboard shortcuts",
+    dlgSubtitle: "Every seek works on the lesson timeline.",
+    dlgClose: "Close shortcuts",
+    dlgCloseTitle: "Close (Esc)",
+    themeToggle: "Toggle Light / Dark mode",
+    themeDark: "Dark mode",
+    themeLight: "Light mode",
+    hint: "The entire lesson is contained in this file. GSAP loads from CDN on first open; the lesson slides and audio are 100% offline.",
+  },
+};
+
+function playerMarkup(lesson: Lesson): string {
+  const lang = lesson.language === "vi" ? "vi" : "en";
+  const t = STANDALONE_I18N[lang];
+  const total = lesson.duration || 1;
+  const bands = lesson.chapters
+    .map((chapter, index) => {
+      const left = percent(chapter.start, total);
+      const width = Math.min(
+        100 - parseFloat(left),
+        Math.max(0.8, ((chapter.end - chapter.start) / total) * 100),
+      );
+      return (
+        `<span class="chapter" data-chapter="${index}" data-state="todo"` +
+        ` style="left:${left};width:${width}%" title="${escapeHtml(chapter.title)}">` +
+        `${escapeHtml(chapter.title)}</span>`
+      );
+    })
+    .join("");
+  const ticks = lesson.scenes
+    .slice(1)
+    .map(
+      (scene) => `<span class="tick" style="left:${percent(scene.start, total)}"></span>`,
+    )
+    .join("");
+  const speeds = RATES.map(
+    (rate) =>
+      `<option value="${rate}"${rate === 1 ? " selected" : ""}>${rate}&times;</option>`,
+  ).join("");
+  const chapters = lesson.chapters
+    .map(
+      (chapter, index) =>
+        `<button type="button" class="mark" data-chapter="${index}" data-seek="${chapter.start}">` +
+        `<span class="nm">${escapeHtml(chapter.title)}</span>` +
+        `<span class="at">${chapter.start.toFixed(1)}s</span></button>`,
+    )
+    .join("");
+
+  return (
+    `<div class="player" id="player">` +
+    `<div class="scrubwrap">` +
+    `<div class="hovertime" id="hovertime" data-visible="false">00:00.0</div>` +
+    `<div class="scrub" id="scrub" role="slider" tabindex="0"` +
+    ` aria-label="${t.ariaTimeline}"` +
+    ` aria-valuemin="0" aria-valuemax="${Math.round(total)}" aria-valuenow="0"` +
+    ` aria-valuetext="0 ${t.scenes}" data-dragging="false">` +
+    `<div class="chapterband">${bands}</div>` +
+    `<div class="rail"><div class="fill" id="fill"></div></div>` +
+    `<div class="loopregion" id="loopregion" data-on="false" hidden></div>` +
+    ticks +
+    `<div class="handle" id="handle" style="left:0%"></div>` +
+    `</div></div>` +
+    `<div class="scrubfoot">` +
+    `<span>${lesson.scenes.length} ${t.scenes} &middot; ${lesson.chapters.length} ${t.chapters}</span>` +
+    `<span>${t.keyHints}</span>` +
+    `</div>` +
+    `<div class="transport">` +
+    toolButton("toStart", t.toStart, t.toStartTitle, "toStart") +
+    toolButton("back10", t.back10, t.back10Title, "back10") +
+    toolButton("stepBack", t.stepBack, t.stepBackTitle, "stepBack") +
+    `<button type="button" class="tplay" id="play" title="${t.playTitle}" aria-label="${t.play}">` +
+    icon("play", true) +
+    `</button>` +
+    toolButton("stepForward", t.stepForward, t.stepForwardTitle, "stepForward") +
+    toolButton("forward10", t.forward10, t.forward10Title, "forward10") +
+    toolButton("toEnd", t.toEnd, t.toEndTitle, "toEnd") +
+    `<span class="clock" id="clock">00:00.0 / 00:00.0</span>` +
+    `<span class="tsep" aria-hidden="true"></span>` +
+    `<div class="loopbox">` +
+    `<button type="button" class="tbtn" id="loop" aria-pressed="false"` +
+    ` title="${t.loopTitle}" aria-label="${t.loopAria}">` +
+    `${icon("repeat")}<span>A&rarr;B</span></button>` +
+    `<button type="button" class="ab" id="setA" title="${t.setATitle}">A 00:00.0</button>` +
+    `<button type="button" class="ab" id="setB" title="${t.setBTitle}">B 00:00.0</button>` +
+    `<button type="button" class="clearbtn" id="clearLoop" title="${t.clearLoopTitle}">${t.clearLoop}</button>` +
+    `</div>` +
+    `<select class="rate" id="speed" title="${t.speedTitle}"` +
+    ` aria-label="${t.speedAria}">${speeds}</select>` +
+    `<div class="volrow">` +
+    toolButton("mute", t.mute, t.muteTitle, "volumeHigh") +
+    `<input type="range" id="vol" min="0" max="1" step="0.05" value="1"` +
+    ` aria-label="${t.volume}" title="${t.volume100}" />` +
+    toolButton("help", t.help, t.helpTitle, "keyboard") +
+    toolButton("fullscreen", t.fullscreen, t.fullscreenTitle, "fullscreen") +
+    `</div>` +
+    `</div>` +
+    (chapters ? `<div class="chapterlist" id="chapterlist">${chapters}</div>` : "") +
+    `</div>`
+  );
+}
+
+/**
+ * The shortcut sheet.
+ */
+function shortcutsMarkup(lang: "en" | "vi" = "vi"): string {
+  const isVi = lang === "vi";
+  const t = STANDALONE_I18N[lang];
+  const groups: Array<[string, Array<[string, string]>]> = isVi
+    ? [
+        [
+          "Tua & phát",
+          [
+            ["Space / K", "Phát hoặc tạm dừng"],
+            ["← / →", "Tua lui / tua tới 5 giây"],
+            ["J / L", "Tua lui / tua tới 10 giây"],
+            ["Shift + ← / →", "Tua chậm 1 giây"],
+            [", / .", "Lùi / tiến đúng 1 khung hình"],
+            ["0 – 9", "Nhảy tới 0% – 90% thời lượng"],
+            ["Home / End", "Về đầu / tới cuối"],
+          ],
+        ],
+        [
+          "Lặp một đoạn để học kỹ",
+          [
+            ["[", "Đặt mốc A tại vị trí hiện tại"],
+            ["]", "Đặt mốc B tại vị trí hiện tại"],
+            ["\\", "Bật/tắt lặp A→B"],
+            ["1 lần nhấn", "Chuột kéo trên timeline để tua tự do"],
+          ],
+        ],
+        [
+          "Khác",
+          [
+            ["T", "Chuyển giao diện Sáng / Tối"],
+            ["− / +", "Giảm / tăng tốc độ phát"],
+            ["M", "Tắt hoặc bật tiếng"],
+            ["F", "Toàn màn hình vùng trình chiếu"],
+            ["?", "Mở bảng phím tắt này"],
+            ["Esc", "Đóng bảng / thoát toàn màn hình / đóng ảnh phóng to"],
+          ],
+        ],
+      ]
+    : [
+        [
+          "Seek & play",
+          [
+            ["Space / K", "Play or pause"],
+            ["← / →", "Back / forward 5 seconds"],
+            ["J / L", "Back / forward 10 seconds"],
+            ["Shift + ← / →", "Nudge 1 second"],
+            [", / .", "Back / forward 1 frame"],
+            ["0 – 9", "Jump to 0% – 90% of the lesson"],
+            ["Home / End", "Go to start / end"],
+          ],
+        ],
+        [
+          "Loop a section to study it",
+          [
+            ["[", "Set marker A at current position"],
+            ["]", "Set marker B at current position"],
+            ["\\", "Turn the A→B loop on/off"],
+            ["1 press", "Drag on the timeline to scrub freely"],
+          ],
+        ],
+        [
+          "Other",
+          [
+            ["T", "Toggle Light / Dark mode"],
+            ["− / +", "Slow down / speed up"],
+            ["M", "Mute or unmute"],
+            ["F", "Fullscreen the slide"],
+            ["?", "Open this shortcut list"],
+            ["Esc", "Close dialog / exit fullscreen / close zoom"],
+          ],
+        ],
+      ];
+
+  return (
+    `<div class="dlg" id="dlg" role="dialog" aria-modal="true" aria-label="${t.dlgTitle}">` +
+    `<div class="dlg-panel">` +
+    `<div class="dlg-head"><div>` +
+    `<h2>${t.dlgTitle}</h2>` +
+    `<p>${t.dlgSubtitle}</p>` +
+    `</div>` +
+    toolButton("dlgClose", t.dlgClose, t.dlgCloseTitle, "close") +
+    `</div>` +
+    `<div class="dlg-grid">` +
+    groups
+      .map(
+        ([title, rows]) =>
+          `<section><h3>${title}</h3><ul>` +
+          rows
+            .map(
+              ([keys, what]) =>
+                `<li><span class="kbd">${escapeHtml(keys)}</span>` +
+                `<span class="what">${escapeHtml(what)}</span></li>`,
+            )
+            .join("") +
+          `</ul></section>`,
+      )
+      .join("") +
+    `</div>` +
+    `</div></div>`
+  );
+}
+
+const PLAYER_JS = `
+(function () {
+  var data = JSON.parse(document.getElementById('lesson-data').textContent);
+  var stage = document.getElementById('stage');
+  var wrap = document.getElementById('wrap');
+  var tl = gsap.timeline({ paused: true, defaults: { ease: 'power3.out' } });
+
+  data.scenes.forEach(function (scene, index) {
+    var el = stage.querySelector('[data-scene="' + index + '"]');
+    var card = el.querySelector('.card');
+    var title = el.querySelector('.title');
+    var sub = el.querySelector('.sub');
+    var rows = el.querySelectorAll('.body li');
+    var formula = el.querySelector('.formula');
+    var figure = el.querySelector('.fig');
+    var cap = el.querySelector('.cap');
+    var bar = el.querySelector('.bar');
+    var at = scene.start;
+    tl.set(el, { autoAlpha: 1, zIndex: 2 }, at);
+    // Two-second fade into the next scene, same rule as the web player: the
+    // outgoing slide dissolves across its last two seconds instead of cutting.
+    // The last scene stays up, also like the web player: there is no next
+    // scene to hand over to, and fading it out parked the deck on a blank card
+    // (recorded exports ended on one).
+    (function () {
+      var fade = Math.min(2, scene.duration / 2);
+      if (index < data.scenes.length - 1) {
+        tl.to(el, { autoAlpha: 0, scale: 0.985, duration: fade, ease: 'power2.inOut' }, at + scene.duration - fade);
+      }
+      tl.set(el, { zIndex: 1 }, at + scene.duration);
+    })();
+    // The studio's entrance motion, same table as the web player: "to" is
+    // always the natural layout, and a deck without the field plays still.
+    var MOTIONS = {
+      rise: { card: { y: 26, opacity: 0 }, title: { yPercent: 60, opacity: 0 }, item: { x: -18, opacity: 0 }, stagger: 0.09, ease: 'power3.out', duration: 0.55 },
+      fade: { card: { opacity: 0 }, title: { opacity: 0 }, item: { opacity: 0 }, stagger: 0.06, ease: 'power2.out', duration: 0.7 },
+      pop: { card: { y: 10, scale: 0.92, opacity: 0 }, title: { yPercent: 40, scale: 0.96, opacity: 0 }, item: { y: 14, opacity: 0 }, stagger: 0.07, ease: 'back.out(1.6)', duration: 0.5 },
+      zoom: { card: { scale: 1.14, opacity: 0 }, title: { scale: 1.06, opacity: 0 }, item: { opacity: 0 }, stagger: 0.07, ease: 'power2.out', duration: 0.6 },
+      'slide-left': { card: { x: -48, opacity: 0 }, title: { x: -30, opacity: 0 }, item: { x: -30, opacity: 0 }, stagger: 0.09, ease: 'power3.out', duration: 0.55 },
+      'slide-right': { card: { x: 48, opacity: 0 }, title: { x: 30, opacity: 0 }, item: { x: 30, opacity: 0 }, stagger: 0.09, ease: 'power3.out', duration: 0.55 },
+      bounce: { card: { y: 26, opacity: 0 }, title: { yPercent: 50, opacity: 0 }, item: { x: -14, opacity: 0 }, stagger: 0.08, ease: 'bounce.out', duration: 0.75 },
+      flip: { card: { rotationY: -45, transformPerspective: 900, opacity: 0 }, title: { opacity: 0 }, item: { opacity: 0 }, stagger: 0.07, ease: 'power3.out', duration: 0.65 },
+      blur: { card: { filter: 'blur(12px)', opacity: 0 }, title: { filter: 'blur(8px)', opacity: 0 }, item: { opacity: 0 }, stagger: 0.06, ease: 'power2.out', duration: 0.6 }
+    };
+    var motion = MOTIONS[data.motion] || null;
+    if (motion) {
+      var rest = { x: 0, y: 0, yPercent: 0, scale: 1, rotationY: 0, opacity: 1, filter: 'blur(0px)', immediateRender: false };
+      var items = el.querySelectorAll('.body li');
+      tl.fromTo(card, motion.card, Object.assign({}, rest, { duration: motion.duration, ease: motion.ease }), at)
+        .fromTo(title, motion.title, Object.assign({}, rest, { duration: motion.duration, ease: motion.ease }), at + 0.08);
+      if (sub) tl.fromTo(sub, { y: 14, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, immediateRender: false }, at + 0.18);
+      if (items.length) tl.fromTo(items, motion.item, Object.assign({}, rest, { duration: motion.duration, stagger: motion.stagger, ease: motion.ease }), at + 0.3);
+    }
+    if (motion && formula) tl.fromTo(formula, { scale: 0.94, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.5, ease: 'back.out(1.5)' }, at + 0.45);
+    if (figure) tl.fromTo(figure, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, at + 0.5);
+    if (cap) tl.fromTo(cap, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, at + Math.min(scene.duration * 0.55, 1.6));
+    if (bar) tl.fromTo(bar, { scaleX: 0 }, { scaleX: 1, duration: scene.duration, ease: 'none' }, at);
+  });
+  tl.duration(Math.max(data.duration || 0, tl.duration()));
+  var total = tl.duration();
+
+  var current = 0, playing = false, rate = 1, raf = null, last = 0;
+  var loopOn = false, loopA = 0, loopB = 0;
+  var muted = false, volume = 1, dragging = false, seekPending = null, seekRaf = null;
+  var clock = document.getElementById('clock');
+  var playBtn = document.getElementById('play');
+  var playerEl = document.getElementById('player');
+  var fps = data.fps || 30;
+
+  // --- fullscreen: the transport rides over the slide and fades when nobody is
+  // reaching for it, the same rule as the web player's FullscreenControls.
+  // Mirrored rather than shared: this file ships without a bundler.
+  var idleTimer = null;
+  function wake() {
+    if (!playerEl || !document.fullscreenElement) return;
+    playerEl.setAttribute('data-idle', 'false');
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    // A paused deck is being read, and reading takes longer than the countdown.
+    if (playing) idleTimer = setTimeout(function () {
+      playerEl.setAttribute('data-idle', 'true');
+    }, 2600);
+  }
+
+  // --- the timeline and the transport row.
+  var scrub = document.getElementById('scrub');
+  var fill = document.getElementById('fill');
+  var handle = document.getElementById('handle');
+  var hovertime = document.getElementById('hovertime');
+  var loopRegion = document.getElementById('loopregion');
+  var muteBtn = document.getElementById('mute');
+  var rateSelect = document.getElementById('speed');
+  var volInput = document.getElementById('vol');
+  var chapterEls = scrub.querySelectorAll('.chapter');
+  var chapterRows = document.querySelectorAll('.chapterlist .mark');
+  var chapters = data.chapters || [];
+  var dlg = document.getElementById('dlg');
+  // The icons that change with state are written here rather than kept as extra
+  // hidden nodes in the markup: the play button and the volume button swap theirs
+  // constantly, and a hidden node per state is a node the file never reads.
+  var RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  var PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" data-fill="1"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+  var PAUSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" data-fill="1"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>';
+  var FULLSCREEN_ICON = '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>';
+  var SHRINK_ICON = '<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>';
+  var VOLUME_ICONS = {
+    high: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+    low: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>',
+    mute: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/>'
+  };
+  scrub.setAttribute('aria-valuemax', String(Math.round(total)));
+
+  // --- teacher voice: one narration clip per scene, embedded as data URIs.
+  // There is no server here, so every clip rides inside the file. The timeline
+  // stays the master clock for the slides, but each clip is fitted to its
+  // scene (see voiceFit) and the caption follows the clip, not the playhead —
+  // otherwise a fitted clip drifts from the words it is lighting.
+  var voiceEls = [];
+  for (var vi = 0; vi < data.scenes.length; vi++) {
+    var vel = stage.querySelector('[data-scene="' + vi + '"] audio[data-voice]');
+    voiceEls.push(vel && vel.getAttribute('src') ? vel.getAttribute('src') : null);
+  }
+  var voice = document.getElementById('voice');
+  var voiceOn = true;
+  var voiceScene = -1;
+
+  // Same per-scene fit as the web player's paceFitRate (src/lib/karaoke),
+  // ceiling included — 1.4, because teaching pace stretches every clip by
+  // 1/0.75 and a deck exported before that stretch still has to speak at its
+  // own pace. Engines do not speak every slide at the same pace, so 1x sounds
+  // uneven slide to slide. Mirrored here instead of shared: this file ships
+  // without a bundler. The duration arrives with the clip's metadata, which
+  // lands just after a swap — the listener below re-applies the rate once it
+  // does, and until then the previous clip's fit (or 1x) holds for a few
+  // milliseconds.
+  function voiceFit(idx) {
+    var scene = data.scenes[idx];
+    var audio = 0;
+    try { audio = voice.duration || 0; } catch (e) {}
+    var slide = (scene && scene.duration) || 0;
+    if (!(audio > 0) || !(slide > 0)) return 1;
+    var avail = slide - 1.5;
+    if (!(avail > 1)) return 1;
+    return Math.min(1.4, Math.max(0.8, audio / avail));
+  }
+  function applyVoiceRate() {
+    var idx = voiceScene >= 0 ? voiceScene : sceneIndexAt(current);
+    try {
+      voice.playbackRate = rate * voiceFit(idx);
+      if ('preservesPitch' in voice) voice.preservesPitch = true;
+    } catch (e) {}
+  }
+  voice.addEventListener('loadedmetadata', function () { applyVoiceRate(); });
+
+  // --- dead air: a clip shorter than its scene used to leave the deck sitting
+  // in silence until the scene's fixed duration ran out. When the clip ends
+  // early, land on the fade's doorstep rather than the boundary itself, so
+  // the two-second scene transition still plays instead of being jumped over.
+  // Skipped while looping (the loop owns the playhead there); remainders under
+  // 2.5s are the designed end-of-slide pause, not dead air.
+  voice.addEventListener('ended', function () {
+    if (!playing) return;
+    if (loopOn && loopB > loopA) return;
+    try { voice.pause(); } catch (e) {}
+    var idx = sceneIndexAt(current);
+    var scene = data.scenes[idx];
+    if (!scene || voiceScene !== idx) return;
+    var end = scene.start + scene.duration;
+    if (end - current < 2.5) return;
+    if (idx >= data.scenes.length - 1) { seek(total); stop(); return; }
+    seek(end - 2);
+  });
+
+  // --- the caption, read the way the web player reads it.
+  //
+  // Every sentence of every scene is already in the file, each word carrying its
+  // speaking window in data-s (seconds into the scene's own clip, aligned
+  // server-side). The playhead decides two things per frame, and only two:
+  // which sentence is live, and which word inside it is being spoken. Words
+  // before the current one are "said", the current one takes the accent, the
+  // rest stay faint — three states, because a line that only lights the current
+  // word is hard to read: the eye needs the words already spoken to follow the
+  // sentence, and the ones not yet reached to know what is coming.
+  //
+  // The sentence rule is the last one whose first word has begun. A caption that
+  // advanced on a timer would drift from the voice, and drift is the one thing
+  // that makes a karaoke caption feel broken.
+  var caps = [];
+  for (var ci = 0; ci < data.scenes.length; ci++) {
+    var capEl = stage.querySelector('[data-scene="' + ci + '"] .cap');
+    var sentEls = capEl ? capEl.querySelectorAll('.sent') : [];
+    var sents = [];
+    for (var si = 0; si < sentEls.length; si++) {
+      var wordEls = sentEls[si].querySelectorAll('.w');
+      var words = [];
+      for (var wi = 0; wi < wordEls.length; wi++) {
+        var ws = parseFloat(wordEls[wi].getAttribute('data-s'));
+        words.push({ el: wordEls[wi], start: isFinite(ws) ? ws : null, state: 'idle' });
+      }
+      var ss = parseFloat(sentEls[si].getAttribute('data-start'));
+      sents.push({ el: sentEls[si], words: words, start: isFinite(ss) ? ss : null, row: 'off', lit: -2 });
+    }
+    caps.push(sents);
+  }
+
+  function restamp(sent, active) {
+    for (var i = 0; i < sent.words.length; i++) {
+      var state = active > -1 && i < active ? 'said' : (active === i ? 'now' : 'idle');
+      if (sent.words[i].state !== state) {
+        sent.words[i].el.setAttribute('data-state', state);
+        sent.words[i].state = state;
+      }
+    }
+    sent.lit = active;
+  }
+
+  function paintCaption(idx, off) {
+    for (var i = 0; i < caps.length; i++) {
+      var list = caps[i];
+      var spoken = -1;
+      if (i === idx) {
+        for (var j = 0; j < list.length; j++) {
+          var start = list[j].start;
+          if (start === null) continue;
+          if (start <= off) spoken = j;
+        }
+        if (spoken < 0) spoken = 0;
+      }
+      for (var k = 0; k < list.length; k++) {
+        var sent = list[k];
+        var row = i !== idx ? 'off' : (k === spoken ? 'live' : (k === spoken + 1 ? 'next' : 'off'));
+        if (row !== sent.row) {
+          sent.el.setAttribute('data-row', row);
+          sent.row = row;
+        }
+        if (k !== spoken) {
+          // Off screen, so the words do not matter — but they must not keep a
+          // highlight from the last time this sentence was the live one.
+          if (sent.lit !== -1) restamp(sent, -1);
+          continue;
+        }
+        // The word being spoken: the last one that has already started. A step
+        // forward rewrites two words, the one left and the one entered; a seek
+        // can jump the length of the sentence, so the whole range is re-stamped.
+        var want = -1;
+        for (var w = 0; w < sent.words.length; w++) {
+          if (sent.words[w].start !== null && sent.words[w].start <= off) want = w;
+        }
+        if (want === sent.lit) continue;
+        if (Math.abs(want - sent.lit) > 1) {
+          restamp(sent, want);
+        } else {
+          var leaving = sent.lit >= 0 ? sent.words[sent.lit] : null;
+          if (leaving) {
+            var left = sent.lit < want ? 'said' : 'idle';
+            if (leaving.state !== left) {
+              leaving.el.setAttribute('data-state', left);
+              leaving.state = left;
+            }
+          }
+          var entering = want >= 0 ? sent.words[want] : null;
+          if (entering && entering.state !== 'now') {
+            entering.el.setAttribute('data-state', 'now');
+            entering.state = 'now';
+          }
+          sent.lit = want;
+        }
+      }
+    }
+  }
+
+  function sceneIndexAt(t) {
+    var idx = 0;
+    for (var i = 0; i < data.scenes.length; i++) {
+      if (t >= data.scenes[i].start) idx = i;
+    }
+    return idx;
+  }
+
+  function syncVoice() {
+    if (!voiceOn) { try { voice.pause(); } catch (e) {} return; }
+    var idx = sceneIndexAt(current);
+    var src = voiceEls[idx];
+    if (!src) { try { voice.pause(); } catch (e) {} voiceScene = -2; return; }
+    if (voiceScene !== idx) {
+      voiceScene = idx;
+      try { voice.src = src; } catch (e) {}
+    }
+    // The timeline runs at rate and the caption follows the voice, so the clip
+    // has to follow both — without this the words light up at 2x while the
+    // voice reads at 1x and the two part ways within a sentence. Re-applied on
+    // every swap: some browsers drop a custom rate when the source changes.
+    // The fit on top (see voiceFit): engines speak unevenly slide to slide.
+    applyVoiceRate();
+    if (playing) {
+      var off = Math.max(0, current - data.scenes[idx].start);
+      try {
+        if (voice.duration && off < voice.duration && Math.abs((voice.currentTime || 0) - off) > 0.4) {
+          voice.currentTime = off;
+        }
+      } catch (e) {}
+      var played = voice.play();
+      if (played && played.catch) played.catch(function () {});
+    } else {
+      try { voice.pause(); } catch (e) {}
+    }
+  }
+
+  function fmt(value) {
+    var s = Math.max(0, value || 0);
+    var m = Math.floor(s / 60);
+    var sec = Math.floor(s % 60);
+    var tenths = Math.floor((s - Math.floor(s)) * 10);
+    return (m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec + '.' + tenths;
+  }
+
+  function paint() {
+    tl.pause();
+    tl.time(current);
+    var share = total > 0 ? (current / total) * 100 : 0;
+    fill.style.width = share.toFixed(3) + '%';
+    handle.style.left = share.toFixed(3) + '%';
+    clock.textContent = fmt(current) + ' / ' + fmt(total);
+    scrub.setAttribute('aria-valuenow', current.toFixed(2));
+    scrub.setAttribute('aria-valuetext', fmt(current) + ' trên ' + fmt(total));
+    // Which chapters are behind the playhead. The rail alone answers "how far",
+    // but a deck read at 2x leaves the reader with no way to tell that whole
+    // sections are done — and the bands are the only place the deck's structure
+    // is drawn, so it is the only place it can be marked.
+    for (var ci = 0; ci < chapters.length; ci++) {
+      var chapter = chapters[ci];
+      var passed = current >= chapter.end;
+      var inside = current >= chapter.start && current < chapter.end;
+      var state = passed ? 'passed' : (inside ? 'current' : 'todo');
+      var band = chapterEls[ci];
+      if (band && band.getAttribute('data-state') !== state) band.setAttribute('data-state', state);
+      var row = chapterRows[ci];
+      if (row) row.setAttribute('data-current', inside ? 'true' : 'false');
+    }
+    var idx = sceneIndexAt(current);
+    // The caption follows the voice, not the timeline: the per-scene fit means
+    // the clip no longer runs 1:1 with the playhead, so timeline offsets would
+    // light words the teacher has not reached yet. Same rule as the web player.
+    var off = Math.max(0, current - data.scenes[idx].start);
+    if (voiceOn && playing && voiceScene === idx && !voice.paused) {
+      try {
+        var vt = voice.currentTime;
+        if (isFinite(vt) && vt >= 0 && voice.duration > 0 && vt <= voice.duration) off = vt;
+      } catch (e) {}
+    }
+    paintCaption(idx, off);
+    if (playing && idx !== voiceScene) syncVoice();
+  }
+
+  function seek(value) {
+    current = Math.max(0, Math.min(value, total));
+    paint();
+    syncVoice();
+  }
+
+  function setPlayIcon(name) {
+    playBtn.innerHTML = name;
+    playBtn.setAttribute('aria-label', name === PAUSE_ICON ? 'Tạm dừng' : 'Phát');
+    playBtn.setAttribute('title', name === PAUSE_ICON ? 'Tạm dừng (Space)' : 'Phát (Space)');
+  }
+
+  function stop() {
+    playing = false;
+    setPlayIcon(PLAY_ICON);
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    try { voice.pause(); } catch (e) {}
+    // Both ends of the transport, or pausing on a faded bar hides the only
+    // control that can start it again.
+    wake();
+  }
+
+  function start() {
+    if (current >= total - 0.05) current = 0;
+    playing = true;
+    setPlayIcon(PAUSE_ICON);
+    wake();
+    last = performance.now();
+    raf = requestAnimationFrame(tick);
+    syncVoice();
+  }
+
+  function toggle() {
+    playing ? stop() : start();
+  }
+
+  function tick(now) {
+    if (!playing) return;
+    var delta = Math.min((now - last) / 1000, 0.25);
+    last = now;
+    current += delta * rate;
+    if (loopOn && loopB > loopA && current >= loopB) {
+      current = loopA;
+    }
+    if (current >= total) { current = total; paint(); stop(); return; }
+    paint();
+    raf = requestAnimationFrame(tick);
+  }
+
+  // --- the timeline: click to seek, drag to scrub, hover for the timecode.
+  //
+  // Drag seeks are coalesced to one per frame. A pointermove can fire faster
+  // than the deck can be told about, and every one of those seeks repaints the
+  // slide, the caption and the voice — so the drag reads the position and hands
+  // over at most one seek per frame.
+  function ratioFrom(clientX) {
+    var rect = scrub.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (clientX - rect.left) / Math.max(rect.width, 1)));
+  }
+
+  function queueSeek(time) {
+    seekPending = time;
+    if (seekRaf !== null) return;
+    seekRaf = requestAnimationFrame(function () {
+      seekRaf = null;
+      if (seekPending !== null) seek(seekPending);
+    });
+  }
+
+  scrub.addEventListener('pointerdown', function (event) {
+    dragging = true;
+    scrub.setAttribute('data-dragging', 'true');
+    if (scrub.setPointerCapture) {
+      try { scrub.setPointerCapture(event.pointerId); } catch (e) {}
+    }
+    try { scrub.focus({ preventScroll: true }); } catch (e) {}
+    seek(ratioFrom(event.clientX) * total);
+  });
+
+  scrub.addEventListener('pointermove', function (event) {
+    var time = ratioFrom(event.clientX) * total;
+    var rect = scrub.getBoundingClientRect();
+    var offset = Math.min(
+      Math.max(event.clientX - rect.left, 52),
+      Math.max(rect.width - 52, 52),
+    );
+    hovertime.style.transform = 'translateX(' + offset.toFixed(0) + 'px)';
+    hovertime.textContent = fmt(time);
+    hovertime.setAttribute('data-visible', 'true');
+    if (dragging) queueSeek(time);
+  });
+
+  function endDrag(event) {
+    if (!dragging) return;
+    dragging = false;
+    scrub.setAttribute('data-dragging', 'false');
+    if (scrub.releasePointerCapture && event.pointerId !== undefined) {
+      try { scrub.releasePointerCapture(event.pointerId); } catch (e) {}
+    }
+  }
+
+  scrub.addEventListener('pointerup', endDrag);
+  scrub.addEventListener('pointercancel', endDrag);
+  scrub.addEventListener('pointerleave', function () {
+    hovertime.setAttribute('data-visible', 'false');
+  });
+
+  // --- the A→B loop, drawn on the timeline as well as set from the bar.
+  function syncLoop() {
+    var loopBtn = document.getElementById('loop');
+    loopBtn.setAttribute('aria-pressed', loopOn ? 'true' : 'false');
+    document.getElementById('setA').textContent = 'A ' + fmt(loopA);
+    document.getElementById('setB').textContent = 'B ' + fmt(loopB);
+    if (loopB > loopA) {
+      loopRegion.hidden = false;
+      loopRegion.setAttribute('data-on', loopOn ? 'true' : 'false');
+      loopRegion.style.left = ((loopA / total) * 100).toFixed(3) + '%';
+      loopRegion.style.width = (((loopB - loopA) / total) * 100).toFixed(3) + '%';
+    } else {
+      loopRegion.hidden = true;
+    }
+  }
+
+  function setPoint(which) {
+    if (which === 'a') {
+      loopA = current;
+      if (loopB <= loopA) loopB = Math.min(total, loopA + 5);
+    } else {
+      loopB = current;
+      if (loopA >= loopB) loopA = Math.max(0, loopB - 5);
+    }
+    syncLoop();
+  }
+
+  // --- loudness: the slider and the mute button write the same value, so the
+  // deck and the synthesised voice follow each other.
+  function applyVolume() {
+    voiceOn = !muted;
+    try {
+      voice.volume = volume;
+      voice.muted = muted;
+    } catch (e) {}
+    var shape = muted ? 'mute' : (volume < 0.5 ? 'low' : 'high');
+    muteBtn.querySelector('svg').innerHTML = VOLUME_ICONS[shape];
+    muteBtn.setAttribute('aria-label', muted ? 'Bật tiếng' : 'Tắt hoặc bật tiếng');
+    volInput.title = 'Âm lượng ' + Math.round(volume * 100) + '%';
+    if (muted) { try { voice.pause(); } catch (e) {} }
+  }
+
+  function stepRate(direction) {
+    var at = RATES.indexOf(rate);
+    if (at < 0) at = 2;
+    rate = RATES[Math.min(RATES.length - 1, Math.max(0, at + direction))];
+    rateSelect.value = String(rate);
+    applyVoiceRate();
+  }
+
+  function stepFrames(count) {
+    seek(Math.round((current + count / fps) * fps) / fps);
+  }
+
+  function toggleFullscreen() {
+    var target = document.getElementById('wrap');
+    if (document.fullscreenElement) {
+      if (document.exitFullscreen) document.exitFullscreen();
+    } else if (target && target.requestFullscreen) {
+      target.requestFullscreen();
+    }
+  }
+
+  function syncFullscreen() {
+    var on = Boolean(document.fullscreenElement);
+    var btn = document.getElementById('fullscreen');
+    if (!btn) return;
+    // Leaving fullscreen must not leave the bar faded: outside it the transport
+    // is the page's own layout, not an overlay that gets out of the way.
+    if (!on && playerEl) {
+      playerEl.removeAttribute('data-idle');
+      if (idleTimer !== null) clearTimeout(idleTimer);
+    }
+    if (on) wake();
+    // Guarded: if this ever runs before the transport renders, a throw here
+    // would leave the expand icon on screen while already fullscreen — a
+    // player that zooms in with no visible way back.
+    var svg = btn.querySelector('svg');
+    if (svg) svg.innerHTML = on ? SHRINK_ICON : FULLSCREEN_ICON;
+    btn.setAttribute('aria-label', on ? 'Thoát toàn màn hình' : 'Toàn màn hình');
+    btn.setAttribute('title', on ? 'Thoát toàn màn hình (F hoặc Esc)' : 'Toàn màn hình (F)');
+  }
+
+  function setHelp(open) {
+    dlg.classList[open ? 'add' : 'remove']('on');
+  }
+
+  // --- pictures: click to open, and a missing one takes its figure with it.
+  //
+  // A generated picture can fail to load on a machine with no network, and the
+  // alternative was an empty bordered box the slide carried for the rest of the
+  // lesson. Hiding the figure leaves the slide as it would have been without one.
+  Array.prototype.forEach.call(stage.querySelectorAll('.fig img'), function (img) {
+    img.addEventListener('error', function () {
+      var fig = img.closest ? img.closest('.fig') : null;
+      if (fig) fig.classList.add('gone');
+    });
+  });
+
+  var zoom = document.createElement('div');
+  zoom.className = 'zoom';
+  zoom.setAttribute('role', 'dialog');
+  zoom.setAttribute('aria-label', 'Phóng to ảnh');
+  var zoomImg = document.createElement('img');
+  zoomImg.alt = '';
+  var zoomClose = document.createElement('button');
+  zoomClose.type = 'button';
+  zoomClose.className = 'zoom-x';
+  zoomClose.setAttribute('aria-label', 'Đóng');
+  zoomClose.textContent = '×';
+  zoom.appendChild(zoomImg);
+  zoom.appendChild(zoomClose);
+  document.body.appendChild(zoom);
+
+  function closeZoom() {
+    zoom.classList.remove('on');
+  }
+  zoom.addEventListener('click', closeZoom);
+  zoomClose.addEventListener('click', function (event) {
+    event.stopPropagation();
+    closeZoom();
+  });
+  stage.addEventListener('click', function (event) {
+    var node = event.target;
+    if (!node || node.tagName !== 'IMG' || !node.closest) return;
+    var fig = node.closest('.fig');
+    if (!fig || fig.classList.contains('gone')) return;
+    zoomImg.src = node.src;
+    zoom.classList.add('on');
+  });
+
+  // --- the fit pass, the same one the web player runs.
+  //
+  // A slide with more on it than the paper holds steps the type ladder down
+  // rather than letting the last line run into the caption. The picture is part
+  // of that column and steps with it: it is sized in cqw times the fit step, so
+  // shrinking the words shrinks the photograph too. A slide still too tall at the
+  // floor gets a small picture, and only a slide with no room at all loses it —
+  // a caption nobody can read is the worse outcome either way.
+  //
+  // It measures the column uncapped, because the fit column is capped at the
+  // paper to keep anything from spilling into the caption strip, and it runs
+  // again when a
+  // picture arrives: a remote image is nothing at first paint and its real size a
+  // second later, which is exactly when a mount-time measurement went wrong.
+  var FIT_STEPS = [1, 0.94, 0.88, 0.82, 0.76, 0.7, 0.64, 0.58, 0.52];
+  function fitSlides() {
+    var cards = stage.querySelectorAll('.card');
+    for (var ci = 0; ci < cards.length; ci++) {
+      var card = cards[ci];
+      var fit = card.querySelector('.fit');
+      if (!fit) continue;
+      card.style.setProperty('--slide-fit', '1');
+      card.removeAttribute('data-no-figure');
+      card.removeAttribute('data-small-figure');
+      var style = window.getComputedStyle(card);
+      var available =
+        card.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+      fit.style.maxHeight = 'none';
+      if (available <= 0) { fit.style.maxHeight = ''; continue; }
+      for (var si = 0; si < FIT_STEPS.length; si++) {
+        card.style.setProperty('--slide-fit', String(FIT_STEPS[si]));
+        if (fit.getBoundingClientRect().height <= available) break;
+      }
+      if (card.querySelector('.fig') && fit.getBoundingClientRect().height > available) {
+        card.setAttribute('data-small-figure', 'true');
+        if (fit.getBoundingClientRect().height > available) {
+          card.removeAttribute('data-small-figure');
+          card.setAttribute('data-no-figure', 'true');
+        }
+      }
+      fit.style.maxHeight = '';
+    }
+  }
+  fitSlides();
+  window.addEventListener('resize', fitSlides);
+  // A load event does not bubble, so this is captured: one listener for every
+  // picture in the deck, including the ones that arrive long after the file
+  // opened.
+  stage.addEventListener('load', fitSlides, true);
+
+  document.getElementById('play').addEventListener('click', toggle);
+  document.getElementById('toStart').addEventListener('click', function () { seek(0); });
+  document.getElementById('toEnd').addEventListener('click', function () { seek(total); });
+  document.getElementById('back10').addEventListener('click', function () { seek(current - 10); });
+  document.getElementById('forward10').addEventListener('click', function () { seek(current + 10); });
+  document.getElementById('stepBack').addEventListener('click', function () { stop(); stepFrames(-1); });
+  document.getElementById('stepForward').addEventListener('click', function () { stop(); stepFrames(1); });
+  rateSelect.addEventListener('change', function (event) {
+    rate = parseFloat(event.target.value);
+    applyVoiceRate();
+  });
+  volInput.addEventListener('input', function (event) {
+    volume = parseFloat(event.target.value);
+    applyVolume();
+  });
+  muteBtn.addEventListener('click', function () { muted = !muted; applyVolume(); });
+  document.getElementById('loop').addEventListener('click', function () { loopOn = !loopOn; syncLoop(); });
+  document.getElementById('setA').addEventListener('click', function () { setPoint('a'); });
+  document.getElementById('setB').addEventListener('click', function () { setPoint('b'); });
+  document.getElementById('clearLoop').addEventListener('click', function () {
+    loopOn = false;
+    loopA = 0;
+    loopB = 0;
+    syncLoop();
+  });
+  document.getElementById('help').addEventListener('click', function () { setHelp(true); });
+  document.getElementById('dlgClose').addEventListener('click', function () { setHelp(false); });
+  document.getElementById('fullscreen').addEventListener('click', toggleFullscreen);
+  dlg.addEventListener('click', function (event) {
+    if (event.target === dlg) setHelp(false);
+  });
+  document.addEventListener('fullscreenchange', syncFullscreen);
+  syncFullscreen();
+  wrap.addEventListener('mousemove', wake);
+  wrap.addEventListener('pointerdown', wake);
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-seek]'), function (button) {
+    button.addEventListener('click', function () { seek(parseFloat(button.getAttribute('data-seek'))); });
+  });
+
+  // Dark/Light Mode Switcher for Standalone Export
+  var themeBtn = document.getElementById('theme-btn');
+  function applyTheme(mode) {
+    document.documentElement.setAttribute('data-theme', mode);
+    document.documentElement.style.colorScheme = mode;
+    try {
+      localStorage.setItem('edusgpt_standalone_theme', mode);
+    } catch (e) {}
+  }
+
+  var savedTheme = null;
+  try {
+    savedTheme = localStorage.getItem('edusgpt_standalone_theme');
+  } catch (e) {}
+
+  if (savedTheme === 'light' || savedTheme === 'dark') {
+    applyTheme(savedTheme);
+  }
+
+  if (themeBtn) {
+    themeBtn.addEventListener('click', function () {
+      var current = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      applyTheme(current);
+    });
+  }
+
+  document.addEventListener('keydown', function (event) {
+    var tag = event.target && event.target.tagName ? event.target.tagName : '';
+    if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+    var key = event.key;
+    // Escape only ever closes what is open, in the reverse order the reader put
+    // it: the zoomed picture, then the shortcut sheet, then fullscreen. The
+    // browser also leaves fullscreen on Escape, but only from its own gesture —
+    // the button promises it, so the file honours it too.
+    if (key === 'Escape') {
+      closeZoom();
+      setHelp(false);
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+      return;
+    }
+    if (key === 't' || key === 'T') {
+      var nextTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      applyTheme(nextTheme);
+      return;
+    }
+    if (key === '?' || (key === '/' && event.shiftKey)) {
+      event.preventDefault();
+      setHelp(!dlg.classList.contains('on'));
+      return;
+    }
+    if (key === ' ' || key === 'k' || key === 'K') { event.preventDefault(); toggle(); }
+    else if (key === 'ArrowLeft') { event.preventDefault(); seek(current - (event.shiftKey ? 1 : 5)); }
+    else if (key === 'ArrowRight') { event.preventDefault(); seek(current + (event.shiftKey ? 1 : 5)); }
+    else if (key === 'j' || key === 'J') seek(current - 10);
+    else if (key === 'l' || key === 'L') seek(current + 10);
+    else if (key === ',') { stop(); stepFrames(-1); }
+    else if (key === '.') { stop(); stepFrames(1); }
+    else if (key >= '0' && key <= '9') seek((Number(key) / 10) * total);
+    else if (key === 'Home') seek(0);
+    else if (key === 'End') seek(total);
+    else if (key === '[') setPoint('a');
+    else if (key === ']') setPoint('b');
+    // Four backslashes: this lives in a template literal, so the file has to be
+    // handed the two characters that spell a backslash inside a JS string.
+    else if (key === '\\\\') { loopOn = !loopOn; syncLoop(); }
+    else if (key === '-' || key === '_') stepRate(-1);
+    else if (key === '+' || key === '=') stepRate(1);
+    else if (key === 'm' || key === 'M') { muted = !muted; applyVolume(); }
+    else if (key === 'f' || key === 'F') toggleFullscreen();
+  });
+
+  applyVolume();
+  syncLoop();
+  syncFullscreen();
+  paint();
+
+})();
+`;
+
+export interface StandaloneHtmlOptions {
+  lesson: Lesson;
+  /**
+   * One `data:audio/mpeg;base64` URI per scene, `null` where a scene has no
+   * narration. The file stays server-free: every clip rides inside it.
+   */
+  audios: (string | null)[];
+  /**
+   * One aligned sentence list per scene, from the same `alignSentences` the
+   * web caption uses. Scenes with no timings pass an empty list and render
+   * their narration as plain text.
+   */
+  karaoke: AlignedSentence[][];
+}
+
+export function buildStandaloneHtml({ lesson, audios, karaoke }: StandaloneHtmlOptions): string {
+  const preset = resolveSlideTheme(lesson.theme);
+  const initialDark = isDarkTheme(lesson.theme);
+  const theme = themeCss(preset.palette, initialDark);
+  // `<` is escaped so the JSON blob can never close its own <script> tag.
+  const payload = JSON.stringify(lesson).replace(/</g, "\\u003c");
+
+  const lang = lesson.language === "vi" ? "vi" : "en";
+  const t = STANDALONE_I18N[lang];
+
+  return `<!doctype html>
+<html lang="${lang}" data-theme="${initialDark ? "dark" : "light"}">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(lesson.title)} · EdusGPT</title>
+<style>${CSS}${theme}${katexCss()}</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <div class="head">
+    <div class="head-left">
+      <h1>${escapeHtml(lesson.title)}</h1>
+      <div class="head-tags">
+        <span class="tag">${escapeHtml(lesson.subject)}${lesson.grade ? ` &middot; ${escapeHtml(lesson.grade)}` : ""}</span>
+        <span class="tag mono">${lesson.duration.toFixed(1)}s &middot; ${lesson.scenes.length} ${t.scenes}</span>
+        <span class="tag">${escapeHtml(preset.label)}</span>
+      </div>
+    </div>
+    <button id="theme-btn" class="theme-btn" type="button" aria-label="${t.themeToggle}" title="${t.themeToggle}">
+      <svg class="icon-moon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+      <span class="theme-txt-light">${t.themeLight}</span>
+      <span class="theme-txt-dark">${t.themeDark}</span>
+    </button>
+  </div>
+  <div class="stage" id="stage">${sceneMarkup(lesson, audios, karaoke)}</div>
+  <audio id="voice" preload="auto" style="display:none"></audio>
+  ${playerMarkup(lesson)}
+  <p class="hint">${t.hint}</p>
+</div>
+${shortcutsMarkup(lang)}
+<script id="lesson-data" type="application/json">${payload}</script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+<script>${PLAYER_JS}</script>
+</body>
+</html>
+`;
+}

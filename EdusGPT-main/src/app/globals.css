@@ -1,0 +1,2641 @@
+@import "tailwindcss";
+
+/* Dark mode is driven by one attribute on <html>, so a `dark:` utility and the
+   token block below always mean the same thing. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* =============================================================================
+   EduAI Studio — design tokens
+   Palette: white paper + brand blue + signal gold + ember.
+
+   Every ramp is defined LIGHT-to-DARK, so the low numbers are the strong
+   colours and the high numbers are the washed-out ones. That is the opposite of
+   the dark theme this replaced, and it is deliberate: the codebase only ever
+   names roles ("text-mist-300", "bg-ink-900"), so flipping the direction of the
+   ramps repaints the whole app without touching a single component.
+
+   The project still contains no colour from that family;
+   `npm run check:palette` fails the build if one comes back.
+   ========================================================================== */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", Consolas,
+    "Courier New", monospace;
+
+  /* ink — the paper. 950 is the page, 500 is the strongest border. */
+  --color-ink-950: #f8fafc;
+  --color-ink-900: #ffffff;
+  --color-ink-850: #f1f5f9;
+  --color-ink-800: #e2e8f0;
+  --color-ink-700: #cbd5e1;
+  --color-ink-600: #94a3b8;
+  --color-ink-500: #64748b;
+
+  /* mist — text. 50 is body copy, 500 is the faintest hint. */
+  --color-mist-50: #09090b;
+  --color-mist-100: #18181b;
+  --color-mist-200: #27272a;
+  --color-mist-300: #3f3f46;
+  --color-mist-400: #52525b;
+  --color-mist-500: #71717a;
+
+  /* brand — blue. 100/200 are for text and accents on paper. */
+  --color-brand-100: #0f172a;
+  --color-brand-200: #1e293b;
+  --color-brand-300: #0284c7;
+  --color-brand-400: #0369a1;
+  --color-brand-500: #0284c7;
+  --color-brand-600: #0369a1;
+  --color-brand-700: #075985;
+  --color-brand-800: #bae6fd;
+  --color-brand-900: #e0f2fe;
+
+  /* signal gold — highlights, timestamps, "AI" accent */
+  --color-gold-200: #78350f;
+  --color-gold-300: #92400e;
+  --color-gold-400: #b45309;
+  --color-gold-500: #d97706;
+  --color-gold-600: #f59e0b;
+
+  /* ember — sparing warm accent (attention / live dots) */
+  --color-ember-400: #c2410c;
+  --color-ember-500: #ea580c;
+
+  /* Slide palette.
+     These two resolve to the per-theme values set on `.slide-fitted`, so
+     `bg-sunk` or `text-accent` is correct on either paper without the component
+     knowing which one it is on. They are deliberately unscoped: a slide is the
+     only place they are used, and naming them here rather than repeating a hex in
+     every component is what keeps a theme change to one block. */
+  --color-sunk: var(--slide-bg-sunk);
+  --color-accent: var(--slide-accent);
+
+  --radius-panel: 1.25rem;
+
+  --animate-marquee: marquee 32s linear infinite;
+  --animate-breathe: breathe 7s ease-in-out infinite;
+  --animate-pulse-dot: pulse-dot 1.8s ease-in-out infinite;
+
+  @keyframes marquee {
+    from {
+      transform: translate3d(0, 0, 0);
+    }
+    to {
+      transform: translate3d(-50%, 0, 0);
+    }
+  }
+  @keyframes breathe {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.8;
+      transform: scale(1.04);
+    }
+  }
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.35;
+      transform: scale(0.8);
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-ink-950);
+  }
+
+  ::selection {
+    /* brand-800, not brand-400. The main blue is dark enough that the page's
+       darkest ink on it is unreadable; the pale end of the ramp keeps the same
+       pairing that the old mid teal had. */
+    background: var(--color-brand-800);
+    color: var(--color-mist-50);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-ink-900);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-ink-600);
+    border-radius: 999px;
+    border: 2px solid var(--color-ink-900);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-brand-700);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+
+  /* ---------------------------------------------------------------------------
+     Dark mode.
+
+     The ramps above are written so that flipping their direction repaints the
+     whole app: a component only ever names a role ("bg-ink-900",
+     "text-mist-300"), so dark mode is this one block and no component edit.
+     Slides are deliberately untouched — a lesson slide is paper, and its
+     colours live in --slide-*, not here.
+     --------------------------------------------------------------------------- */
+  html[data-theme="dark"] {
+    color-scheme: dark;
+
+    /* ink — pure neutral dark paper & card surfaces (replaces heavy navy blue). */
+    --color-ink-950: #09090b;
+    --color-ink-900: #121215;
+    --color-ink-850: #18181b;
+    --color-ink-800: #27272a;
+    --color-ink-700: #3f3f46;
+    --color-ink-600: #52525b;
+    --color-ink-500: #71717a;
+
+    /* mist — text, crisp pure white and clean neutral zinc (no murky blue tint). */
+    --color-mist-50: #ffffff;
+    --color-mist-100: #fafafa;
+    --color-mist-200: #f4f4f5;
+    --color-mist-300: #e4e4e7;
+    --color-mist-400: #a1a1aa;
+    --color-mist-500: #71717a;
+
+    /* brand — selective vibrant electric blue accent for intentional contrast. */
+    --color-brand-100: #e0f2fe;
+    --color-brand-200: #bae6fd;
+    --color-brand-300: #7dd3fc;
+    --color-brand-400: #38bdf8;
+    --color-brand-500: #0ea5e9;
+    --color-brand-600: #0284c7;
+    --color-brand-700: #0369a1;
+    --color-brand-800: #075985;
+    --color-brand-900: #0c4a6e;
+
+    /* gold and ember — the warm signals, lightened for a dark page. */
+    --color-gold-200: #fde047;
+    --color-gold-300: #facc15;
+    --color-gold-400: #eab308;
+    --color-gold-500: #ca8a04;
+    --color-gold-600: #a16207;
+    --color-ember-400: #f97316;
+    --color-ember-500: #ea580c;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-[var(--radius-panel)] border border-ink-800 bg-ink-900 shadow-sm backdrop-blur-sm dark:border-ink-800 dark:bg-ink-900/70 dark:shadow-none;
+  }
+
+  .panel-tight {
+    @apply rounded-2xl border border-ink-800 bg-ink-850/80 shadow-xs dark:border-ink-700/70;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-2 rounded-full border border-ink-800 bg-ink-850 px-3 py-1 text-xs font-medium tracking-wide text-mist-300 dark:border-ink-600 dark:bg-ink-800/80;
+  }
+
+  .btn-icon {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-lg border border-ink-800 bg-ink-850 text-mist-200 transition-colors hover:border-brand-500 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-ink-600 dark:bg-ink-800/70 dark:hover:border-brand-600 dark:hover:text-brand-200;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-mist-400;
+  }
+
+  .field {
+    @apply w-full rounded-xl border border-ink-800 bg-ink-900 px-3.5 py-2.5 font-mono text-sm text-mist-100 placeholder:text-mist-500 focus:border-brand-500 focus:outline-none shadow-xs dark:border-ink-600 dark:bg-ink-950/80;
+  }
+
+  .hairline {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-ink-800 to-transparent dark:via-ink-600;
+  }
+
+  /*
+   * Fullscreen playback.
+   *
+   * The stage is a 16:9 box, but a fullscreen element is whatever shape the
+   * screen happens to be — 16:10, 21:9, or a tall window on a phone. Letterbox
+   * it: the slide keeps its proportions, is centred, and everything is measured
+   * against the slide's own width rather than the window's.
+   *
+   * `--slide-w` is what every size below is expressed in. Without it the slide
+   * stretches edge to edge and the content, which is capped at a fixed width,
+   * ends up huddled in the left-hand corner with a screen of empty paper beside
+   * it — which is what fullscreen used to look like.
+   */
+  /*
+   * The stage is the player's frame, and it fills the column it is given.
+   *
+   * `w-full` on the wrapper plus `flex-1` on the panel is the whole fix for a
+   * stage that came out half the width of its column. As a bare `flex` row the
+   * wrapper let the panel size itself to its content, and the panel's content is
+   * a 16:9 slide whose own width comes from... its content. So the slide ended up
+   * 449px wide inside an 833px column, centred, with empty paper either side —
+   * a stage stuck at thumbnail size.
+   *
+   * `flex-1` is what breaks the circularity: the panel takes the column's width
+   * first, and the slide then fills the panel.
+   */
+  /*
+   * The fullscreen player's sliders.
+   *
+   * A bare `<input type="range">` renders a white track and a white thumb, which
+   * on a black control bar is a bright line with no relationship to anything.
+   * Styled here so the track shows the filled portion in the brand blue and the
+   * thumb is a dot, which is what a viewer expects from a loudness control.
+   */
+  .player-range {
+    appearance: none;
+    height: 4px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.22);
+    cursor: pointer;
+  }
+
+  .player-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 9999px;
+    background: #ffffff;
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.5);
+    transition: transform 120ms ease;
+  }
+
+  .player-range::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+
+  .player-range::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: none;
+    border-radius: 9999px;
+    background: #ffffff;
+  }
+
+  .player-range:focus-visible {
+    outline: 2px solid var(--color-brand-400);
+    outline-offset: 4px;
+  }
+
+  /*
+   * Motion miniatures for the studio picker: one looping move per preset on
+   * a dot, transform/opacity only so even ten of them stay cheap. The `35%`
+   * hold in each cycle is what makes a 1.8s loop read as a demo rather than
+   * a flicker.
+   */
+  .mq-stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 2.25rem;
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    overflow: hidden;
+  }
+
+  .mq-dot {
+    display: block;
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 0.2rem;
+    background: var(--color-brand-300);
+  }
+
+  .mq-rise { animation: mq-rise 1.8s ease-in-out infinite; }
+  .mq-fade { animation: mq-fade 1.8s ease-in-out infinite; }
+  .mq-pop { animation: mq-pop 1.8s ease-in-out infinite; }
+  .mq-zoom { animation: mq-zoom 1.8s ease-in-out infinite; }
+  .mq-slide-left { animation: mq-slide-left 1.8s ease-in-out infinite; }
+  .mq-slide-right { animation: mq-slide-right 1.8s ease-in-out infinite; }
+  .mq-bounce { animation: mq-bounce 1.8s ease-in-out infinite; }
+  .mq-flip { animation: mq-flip 1.8s ease-in-out infinite; }
+  .mq-blur { animation: mq-blur 1.8s ease-in-out infinite; }
+
+  @keyframes mq-rise { 0% { transform: translateY(9px); opacity: 0; } 35%, 100% { transform: none; opacity: 1; } }
+  @keyframes mq-fade { 0% { opacity: 0; } 35%, 100% { opacity: 1; } }
+  @keyframes mq-pop { 0% { transform: scale(0.4); opacity: 0; } 35%, 100% { transform: scale(1); opacity: 1; } }
+  @keyframes mq-zoom { 0% { transform: scale(1.6); opacity: 0; } 35%, 100% { transform: scale(1); opacity: 1; } }
+  @keyframes mq-slide-left { 0% { transform: translateX(-16px); opacity: 0; } 35%, 100% { transform: none; opacity: 1; } }
+  @keyframes mq-slide-right { 0% { transform: translateX(16px); opacity: 0; } 35%, 100% { transform: none; opacity: 1; } }
+  @keyframes mq-bounce { 0% { transform: translateY(10px); opacity: 0; } 45% { transform: translateY(-3px); opacity: 1; } 70% { transform: translateY(1px); } 100% { transform: none; opacity: 1; } }
+  @keyframes mq-flip { 0% { transform: rotateY(-75deg); opacity: 0; } 35%, 100% { transform: none; opacity: 1; } }
+  @keyframes mq-blur { 0% { filter: blur(3px); opacity: 0; } 35%, 100% { filter: blur(0); opacity: 1; } }
+
+  .stage-fullscreen {
+    @apply flex w-full items-stretch justify-center bg-ink-950;
+  }
+
+  .stage-fullscreen > .panel {
+    @apply w-full min-w-0 flex-1;
+  }
+
+  .stage-fullscreen:fullscreen {
+    --slide-w: min(100vw, calc(100vh * 16 / 9));
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: #000000 !important;
+  }
+
+  /* Backdrop for the letterbox area, so it is not a hard black void. */
+  .stage-fullscreen:fullscreen::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, #0d1417 0%, #05090b 100%);
+  }
+
+  .slide-fitted {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.08);
+    border-radius: 0.75rem;
+  }
+
+  /*
+ * The lesson page owns the window below the site header.
+ *
+ * The header stays — it is how you get anywhere else — so the body becomes a
+ * column: the header keeps its own height, the page takes the rest, and the
+ * document never scrolls. That is what makes the browser's own zoom work here:
+ * zooming scales every box, and the slide answers by shrinking to the new height
+ * instead of being cropped.
+ *
+ * `:has()` catches the player's own marker class, so this costs no JavaScript and
+ * cannot paint before the page has decided to claim the frame. Only the footer
+ * steps aside: it is a half-screen block of links that has no place on a page
+ * whose whole point is the slide.
+ */
+@media (min-width: 1024px) {
+  body:has(.lesson-shell) {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    /* Vertical allows graceful scrolling on heavy zoom;
+       horizontal is the escape hatch when columns exceed viewport */
+    overflow-x: auto;
+    overflow-y: auto;
+  }
+
+  body:has(.lesson-shell) > header {
+    flex: none;
+  }
+
+  body:has(.lesson-shell) > footer {
+    display: none;
+  }
+
+  body:has(.lesson-shell) > main {
+    flex: 1 1 0%;
+    min-height: 0;
+  }
+}
+
+/*
+   * A stage that fills the window rather than the width it is given.
+   *
+   * `stage-fills` marks the stage whose height comes from the page (the
+   * viewport-locked desktop layout), so the slide has to answer to that height as
+   * well as to the width: 16:9 taken from the smaller of the two, otherwise the
+   * slide keeps its full width and spills below the fold — which on a player this
+   * tall means the caption sits outside the frame.
+   */
+  /*
+   * Column, not row: this panel holds the stage's own header bar, the slide,
+   * then the thin progress rail. As a row the header was squeezed into a 135px
+   * strip off the edge of the frame and the rail collapsed to zero width —
+   * which is exactly how the player looked broken. The slide centres itself
+   * while the bars stretch edge to edge.
+   */
+  .stage-fills > .panel {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .stage-fills > .panel > .slide-fitted {
+    align-self: center;
+  }
+
+  /*
+   * The bars keep their own height: as flex items they would otherwise shrink
+   * to nothing once the slide takes its share — which is how the progress rail
+   * measured 0px tall.
+   */
+  .stage-fills > .panel > .stage-bar,
+  .stage-fills > .panel > .stage-rail {
+    flex: none;
+  }
+
+  /*
+   * `flex: 0 0 auto` is load-bearing. As a flex item the slide would take its
+   * width from its own content — and its content is sized in `cqw`, which is
+   * itself measured from this width. The loop resolves downwards and the slide
+   * collapses to its min-content width instead of the one asked for.
+   *
+   * The 60px reserve is the stage's own header bar plus the progress rail: the
+   * slide answers to the height left after them, not the whole stage, or it
+   * prints over the rail the way it used to print over the caption.
+   */
+  .stage-fills .slide-fitted {
+    flex: 0 0 auto;
+    width: min(100%, calc((100cqh - 60px) * 16 / 9));
+  }
+
+  .stage-fullscreen:fullscreen .slide-fitted {
+    width: var(--slide-w, 100%);
+    height: auto;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  /*
+   * Container queries let the slide lay itself out against its own width, so a
+   * fullscreen slide and an embedded one are the same design at two sizes. A
+   * fixed `max-w-3xl` cannot do this: it is correct at one width and wrong at
+   * every other.
+   */
+  .slide-fitted {
+    container-type: inline-size;
+    container-name: slide;
+  }
+
+  /* ===========================================================================
+     Slide theme — the "typography deck" look.
+
+     A slide is type on a field, and nothing else. The old design filled the
+     paper with tinted cards, a gradient bar, a corner ribbon and a numbered
+     watermark; each of those is a thing for the eye to land on that is not the
+     sentence being taught. What is left is a lot of whitespace, one strong
+     title, and a hairline.
+
+     Every colour below is declared once per theme and read back through var(),
+     so a component never names a colour directly. That is what makes "phối màu
+     chữ hợp lý với nền" a property of the theme rather than something each
+     component has to remember: the ink is always the paper's opposite, and the
+     muted tone is always a fixed step away from it.
+     ======================================================================== */
+  /*
+   * Slide palette — the "typography deck" look.
+
+   * A slide is type on a field, and nothing else. The old design filled the
+   * paper with tinted cards, a gradient bar, a corner ribbon and a numbered
+   * watermark; each of those is a thing for the eye to land on that is not the
+   * sentence being taught. What is left is a lot of whitespace, one strong
+   * title, and a hairline.
+
+   * These are *fallbacks only*. The real values arrive as inline custom
+   * properties from the theme registry (see `lib/lesson/themes.ts`), which is
+   * what lets thirty-six palettes exist without thirty-six blocks of CSS. A
+   * component never names a colour: it reads `--slide-ink` and gets whatever the
+   * chosen paper's opposite is, so "text that contrasts with its background" is
+   * a property of the theme rather than something each component remembers.
+   */
+  .slide-fitted {
+    --slide-bg: #efe9dd;
+    --slide-bg-sunk: #e7e0d1;
+    --slide-ink: #17150f;
+    --slide-ink-soft: #5d564a;
+    --slide-ink-faint: #8d8477;
+    --slide-rule: #cfc5b2;
+    --slide-accent: #9a3324;
+    --slide-accent-soft: #c4695a;
+  }
+
+  .slide-fitted[data-theme] {
+    background-color: var(--slide-bg);
+    /*
+     * Paper depth.
+     *
+     * A slide on one flat colour looks like a screenshot of a slide; a real
+     * sheet has a gradient down it. All three stops are theme roles — paper,
+     * its sunk step, and the faint tone between them — so a dark palette gets a
+     * sheet that settles into its own deeper ink and a paper palette one that
+     * settles into its own warmer tone. The same picture in forty-two
+     * palettes, with no colour named here.
+     */
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--slide-bg) 88%, var(--slide-ink-faint)) 0%,
+      var(--slide-bg) 38%,
+      var(--slide-bg-sunk) 100%
+    );
+    color: var(--slide-ink);
+  }
+
+  /*
+   * The slide arriving.
+   *
+   * Opacity and a translate, never a scale. The fit pass and the pointer both
+   * measure this card's boxes the moment it mounts, and a scale in flight would
+   * have the fit pass read a short column and step the type *up* until the last
+   * bullet ran off the bottom — the one measurement on the page that a
+   * transform cannot be allowed to touch. Opacity and translation change no
+   * box at all, so they are free to animate.
+   */
+  .scene-card.scene-enter {
+    animation: scene-enter 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+
+  @keyframes scene-enter {
+    from {
+      opacity: 0;
+      transform: translateY(1.6cqw);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* A dark slide inside a light app needs to read as ink, not as a hole. Keyed
+     off the resolved background rather than a theme id, so every one of the
+     dark palettes gets the treatment and none of the light ones does. */
+  .stage-fullscreen:fullscreen .slide-fitted[data-theme-dark]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: #0a0908;
+  }
+
+  /* Title: the whole design. Set large and tight, because on a slide with nothing
+     else on it the title is the only thing that has to be read from the back of
+     a room.
+
+     Sizing is *purely* a fraction of the slide's own width, with no rem floor or
+     ceiling. That is a deliberate change: a `clamp()` with rem bounds is not a
+     scale, it is a scale that stops. Below the floor the type no longer shrinks
+     with the slide, and above the ceiling it no longer grows — which is exactly
+     why an embedded slide overflowed and a fullscreen one looked shrunken.
+     Pure container-query sizing is one ratio, so the layout that fits the
+     smallest slide fits every slide, and the title on a 1920px fullscreen deck
+     is genuinely 4x the title on a 490px embedded one. */
+  .scene-title {
+    font-size: 5.2cqw;
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+    color: var(--slide-ink);
+  }
+
+  .scene-sub {
+    font-size: 1.7cqw;
+    color: var(--slide-ink-soft);
+  }
+
+  /*
+   * Inline code, written the way the model writes it: `E = m·c²` inside a
+   * sentence. Monospaced and a shade smaller so a formula sits inside the line
+   * rather than breaking it, on a faint wash of the slide's own ink — a symbol
+   * that reads as part of the sentence instead of as a sticker on top of it.
+   */
+  .scene-inline-code {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    padding: 0.05em 0.35em;
+    border-radius: 0.35em;
+    background: color-mix(in srgb, var(--slide-ink) 8%, transparent);
+    color: var(--slide-ink);
+  }
+
+  /* KaTeX formula typography: always inherit container text color */
+  .katex {
+    color: inherit !important;
+  }
+  .katex-display {
+    margin: 0.5em 0 !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .scene-inline-math {
+    display: inline-block;
+    vertical-align: baseline;
+    line-height: normal;
+  }
+  .scene-inline-math-block {
+    display: block;
+    overflow-x: auto;
+    text-align: center;
+    margin: 0.5rem 0;
+  }
+
+  /* The kicker: small caps, wide tracking, the one place the accent appears in
+     the header. A coloured pill here used to be the loudest thing on the slide,
+     which is exactly backwards for a label. */
+  .scene-kicker {
+    /* `inline-flex` so the icon can sit in the row, rather than the `display:
+       block` this was, which is what a bare label wanted. */
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6cqw;
+    font-size: calc(1.05cqw * var(--slide-fit, 1));
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--slide-accent);
+  }
+
+  .scene-rule {
+    border: 0;
+    border-top: 1px solid var(--slide-rule);
+    width: 22%;
+    margin-left: 0;
+  }
+
+  .scene-bullet-index {
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+    font-weight: 700;
+    color: var(--slide-accent);
+    background: color-mix(in srgb, var(--slide-accent) 15%, transparent);
+    padding: 0.2cqw 0.55cqw;
+    border-radius: 0.4cqw;
+    line-height: 1;
+    align-self: flex-start;
+    margin-top: 0.15cqw;
+  }
+
+  /* Wide margins, because the empty space is the point — but the bottom padding
+     is not a margin at all: it is the caption track.
+
+     The running subtitle is an absolutely-positioned sibling of the scene cards,
+     so nothing in the flow reserves room for it. Without this the last bullet and
+     the caption occupy the same pixels, and a three-line narration sits straight
+     on top of the text it is narrating. `padding-bottom` is what makes the two
+     coexist: the card is inset by exactly the strip the caption lives in. */
+  .scene-card {
+    gap: 1.1cqw;
+    padding: 3.4cqw 5.5cqw var(--slide-caption-track);
+    /*
+     * The type ladder's starting point.
+     *
+     * Declared here rather than left to the fit pass alone: a `calc(... *
+     * var(--slide-fit, 1))` whose custom property is *set but empty* does not
+     * fall back to the 1 — the declaration is simply invalid and dropped, which
+     * is how an interactive panel ended up 127px wide instead of 36cqw.
+     */
+    --slide-fit: 1;
+    /*
+     * `safe center`, not `center`.
+     *
+     * A slide that outgrows its card used to be centred anyway, and centring an
+     * overflowing column pushes the overflow out of BOTH ends. The card clips,
+     * so the title went missing while a table sat happily in the middle: a slide
+     * whose heading had been sliced off the top. `safe` keeps the centring when
+     * the content fits and falls back to the top when it does not, which is the
+     * only ordering where the title is never the thing that gets lost.
+     */
+    justify-content: safe center;
+  }
+
+  /*
+   * The box the fit pass scales.
+   *
+   * `flex-shrink: 0` on it and on every row inside is load-bearing. A flex child
+   * is allowed to shrink below its content, and the bullet list did exactly
+   * that: it collapsed to a zero-height box, its text kept painting outside it,
+   * and the table underneath started at the same y — so the two sat on top of
+   * each other with the numbers unreadable. Nothing inside is allowed to give
+   * way now; the fit pass below scales the whole column instead, which is the
+   * only version of "too much for the card" that loses no content.
+   */
+  .scene-fit {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1cqw;
+    flex-shrink: 0;
+    /*
+     * Capped at the card's own content box, with the picture as the one thing in
+     * here allowed to give way.
+     *
+     * The card reserves the caption track as its bottom padding, so this box is
+     * exactly the space a slide may use. Without the cap a crowded column kept
+     * its height, overflowed past that padding and the picture at the end of it
+     * landed on the caption — the narration hidden behind a photograph, on the
+     * one slide where there was most to read. Type steps down first (the fit
+     * pass); when even the smallest step does not fit, the picture shrinks
+     * instead, because a smaller picture is still worth looking at and an
+     * unreadable caption is not.
+     */
+    max-height: 100%;
+    min-height: 0;
+  }
+
+  .scene-fit > * {
+    flex-shrink: 0;
+  }
+
+  /*
+   * The caption track: the strip of the slide the subtitle is given, and the
+   * card's bottom padding.
+   *
+   * It was 19cqw, which on a 16:9 card is about a third of the height. The
+   * subtitle itself is two rows of 1.75cqw type at a 1.32 line-height — roughly
+   * 5cqw — so the strip was four times the space the caption needed, and every
+   * slide with a table or a chart overflowed because of padding rather than
+   * because of its own content. The caption sits 12% of this strip above the
+   * bottom edge, so 9cqw leaves it clear air and gives the slide back the rest.
+   */
+  .slide-fitted {
+    --slide-caption-track: 9cqw;
+    /*
+     * The fit pass steps this, not a `transform: scale()`.
+     *
+     * Scaling the whole column shrinks everything inside it by the same factor,
+     * including the hairline under the title, the card borders and the letter
+     * spacing — so a crowded slide ended up looking squeezed rather than
+     * smaller. Stepping one multiplier that only the type ladder reads keeps
+     * every line and border at its own size, and picking the first step that
+     * fits is the same lookup a designer does with a type scale.
+     */
+    --slide-fit: 1;
+  }
+
+  /* Every size in the ladder is one ratio of the slide width, times the fit
+     step. `.scene-narration` is deliberately not in it: the caption is read at a
+     distance and never shrinks with the slide it belongs to. */
+  .scene-title {
+    font-size: calc(5.2cqw * var(--slide-fit, 1));
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+    color: var(--slide-ink);
+  }
+
+  .scene-sub {
+    font-size: calc(1.7cqw * var(--slide-fit, 1));
+    color: var(--slide-ink-soft);
+  }
+
+  /*
+   * The bullet list.
+   *
+   * `flex-shrink: 0` because a shrinking list is what produced the overlap this
+   * file used to invite: the box collapsed to nothing, the words kept painting
+   * outside it, and whatever came next landed on top of them. The card is a
+   * fixed 16:9 box and a generated scene can genuinely be too tall for it, so
+   * the honest response is the fit pass scaling the whole column — the list
+   * keeps its height, its three-line clamp keeps a long bullet in check, and
+   * nothing is silently lost.
+   */
+  .scene-body {
+    flex-shrink: 0;
+    /*
+     * The measure of the words, in the stylesheet rather than as a `max-w-[86%]`
+     * utility on the element: a Tailwind utility sits in the utilities layer and
+     * outranks every rule here, so the interactive layout — where the words take
+     * a column and must fill it — could not have widened them.
+     */
+    max-width: 86%;
+  }
+
+  .scene-head {
+    flex-shrink: 0;
+    max-width: 86%;
+  }
+
+  /* A hairline instead of a filled card. Same alignment for the eye, none of the
+     visual weight, and it holds up on both papers.
+
+     Capped at three lines because a generated bullet is not length-checked, and
+     an unbounded bullet on a short slide pushes the ones below it off the
+     bottom — which is silent content loss, the one failure a slide cannot have. */
+  .scene-bullet {
+    font-size: calc(1.35cqw * var(--slide-fit, 1));
+    padding: 1.1cqw 1.4cqw;
+    border-radius: 0.85cqw;
+    background: var(--slide-bg-sunk);
+    border: 1px solid color-mix(in srgb, var(--slide-rule) 85%, transparent);
+    box-shadow: 0 0.35cqw 1.2cqw color-mix(in srgb, var(--slide-ink) 8%, transparent);
+    color: var(--slide-ink);
+    align-items: flex-start;
+    gap: 1.2cqw;
+  }
+
+  .scene-bullet > span:last-child {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
+
+  /* Board solution steps: same hairline rhythm as the bullets, with a step
+     badge (B1, B2…) instead of a plain number so the eye reads "working",
+     not "more bullets". Same three-line clamp as bullets — a step that runs
+     longer is a paragraph, not a step. */
+  .scene-steps {
+    flex-shrink: 0;
+    max-width: 86%;
+  }
+
+  .scene-step {
+    font-size: calc(1.4cqw * var(--slide-fit, 1));
+    padding: 0.75cqw 0;
+    border-top: 1px solid var(--slide-rule);
+    color: var(--slide-ink-soft);
+  }
+
+  .scene-step-index {
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+    font-weight: 700;
+    color: var(--slide-accent);
+  }
+
+  .scene-step > span:last-child {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
+
+  /*
+   * Layouts.
+   *
+   * The renderer reads one `layout` per scene and switches the arrangement
+   * between these rules. They exist because a deck of twelve slides that all use
+   * the same arrangement reads as a template with the content swapped, which is
+   * the difference everyone notices between "generated" and "designed".
+   *
+   * The geometry rules the layouts follow are the ones a designer applies by
+   * hand: symmetric columns of equal width, a fixed spacing ladder, and a type
+   * scale whose steps are close enough to read as one system.
+   */
+
+  /* Cover: one claim, centred, nothing competing with it. Sample covers set
+     the title near a quarter of the sheet height over a pill kicker and a
+     centred rule — the three marks read as one masthead. */
+  .scene-layout-cover .scene-fit {
+    gap: 1.6cqw;
+  }
+
+  .scene-layout-cover .scene-head {
+    margin-inline: auto;
+    text-align: center;
+  }
+
+  .scene-layout-cover .scene-kicker {
+    border-radius: 999px;
+    padding: 0.45cqw 1.4cqw;
+    background: color-mix(in srgb, var(--slide-accent-soft) 22%, transparent);
+    letter-spacing: 0.14em;
+  }
+
+  .scene-layout-cover .scene-title {
+    font-size: calc(8cqw * var(--slide-fit, 1));
+    text-wrap: balance;
+  }
+
+  .scene-layout-cover .scene-sub {
+    font-size: calc(1.9cqw * var(--slide-fit, 1));
+  }
+
+  .scene-layout-cover .scene-rule {
+    margin-inline: auto;
+    width: 14%;
+  }
+
+  .scene-layout-cover .scene-body {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 76%;
+  }
+
+  /* Statement: the claim plus at most two supports, one column, left aligned. */
+  .scene-layout-statement .scene-body {
+    grid-template-columns: 1fr;
+    max-width: 78%;
+  }
+
+  /*
+   * Two columns of exactly equal width.
+   *
+   * `1fr 1fr` with the same gap on both sides of the middle is the symmetry
+   * rule: an earlier version let each column size itself, and two bullets of
+   * different length left the right column visibly narrower than the left.
+   */
+  .scene-layout-two-col .scene-body,
+  .scene-layout-cards .scene-body {
+    grid-template-columns: 1fr 1fr;
+    column-gap: 6%;
+    max-width: 86%;
+  }
+
+  .scene-layout-cards .scene-body {
+    gap: 2.2cqw 4%;
+  }
+
+  .scene-layout-cards .scene-bullet {
+    padding: 1.6cqw 1.8cqw;
+    border-top: 0;
+    border-radius: 0.9cqw;
+    background: var(--slide-bg-sunk);
+    color: var(--slide-ink);
+    align-items: flex-start;
+  }
+
+  /* Picture beside the text: the picture owns one column of a two-column grid. */
+  .scene-layout-image-left .scene-fit,
+  .scene-layout-image-right .scene-fit {
+    gap: 1.4cqw;
+  }
+
+  .scene-layout-image-left .scene-image,
+  .scene-layout-image-right .scene-image,
+  .scene-layout-full-figure .scene-image {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .scene-layout-full-figure .scene-head {
+    max-width: 70%;
+  }
+
+  .scene-layout-full-figure .scene-body {
+    max-width: 70%;
+  }
+
+  /*
+   * Free layout: blocks the model placed on the 1000 x 562.5 grid.
+   *
+   * Positions arrive as percentages of the slide rather than pixels, so one set
+   * of numbers holds on a phone and on a wall. The type ladder still reads
+   * `--slide-fit`, which means a crowded free-layout slide steps its type down
+   * with the rest rather than being scaled as a picture.
+   */
+  .scene-layout-blocks {
+    display: block;
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .scene-blocks {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .scene-block {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0.4cqw;
+    overflow: hidden;
+  }
+
+  .scene-block-title {
+    font-size: calc(5.2cqw * var(--slide-fit, 1));
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+    font-weight: 700;
+    color: var(--slide-ink);
+    text-wrap: balance;
+  }
+
+  .scene-block-sub {
+    font-size: calc(1.7cqw * var(--slide-fit, 1));
+    line-height: 1.35;
+    color: var(--slide-ink-soft);
+  }
+
+  .scene-block-text {
+    font-size: calc(1.4cqw * var(--slide-fit, 1));
+    line-height: 1.5;
+    color: var(--slide-ink-soft);
+  }
+
+  .scene-block-card {
+    justify-content: center;
+    padding: 1.2cqw 1.4cqw;
+    border: 1px solid
+      color-mix(in srgb, var(--slide-rule) 85%, transparent);
+    border-radius: 0.9cqw;
+    background: var(--slide-bg-sunk);
+    box-shadow: 0 0.5cqw 1.4cqw
+      color-mix(in srgb, var(--slide-ink) 12%, transparent);
+  }
+
+  .scene-block-label {
+    font-size: calc(1.05cqw * var(--slide-fit, 1));
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--slide-accent);
+  }
+
+  .scene-block-formula {
+    align-items: flex-start;
+  }
+
+  /*
+   * Geometry blocks: a panel and a line.
+   *
+   * A shape is a rounded panel in the theme's own paper shade, so a card can
+   * sit behind a heading without either of them knowing about the other. A rule
+   * is a hairline in the theme's rule colour, vertically centred in whatever
+   * height it was given. Both take their colour from the palette, so they
+   * follow the theme instead of arriving as one fixed colour.
+   */
+  .scene-block-shape {
+    width: 100%;
+    height: 100%;
+    border-radius: 1.1cqw;
+    background: var(--slide-bg-sunk);
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, var(--slide-rule) 70%, transparent);
+  }
+
+  .scene-block-rule {
+    align-self: center;
+    width: 100%;
+    height: 1px;
+    background: var(--slide-rule);
+  }
+
+  /* A picture in a block fills the box it was given, not a slide's column. */
+  .scene-layout-blocks .scene-image {
+    width: 100%;
+    max-width: 100%;
+    max-height: 100%;
+  }
+
+  .scene-layout-blocks .scene-zoom-open {
+    display: none;
+  }
+
+  /*
+   * The wash: a tinted corner behind the content, the way a designed deck
+   * breathes instead of sitting on flat paper.
+   *
+   * It is drawn as a pseudo-element in front of the paper and behind the
+   * content, tinted with the theme's own accent so it follows the palette —
+   * a dark theme washes with light accent, a paper theme with its warm ink —
+   * and it is only strong enough on the layouts that have room for it. The
+   * text-carrying layouts stay near-flat: a wash behind a paragraph is the
+   * first thing that makes a slide look decorated rather than designed.
+   */
+  .slide-fitted .scene-wash {
+    position: absolute;
+    inset: 0;
+    /* Behind the in-flow content but still inside the slide: `.slide-fitted`
+       carries `z-index: 1`, so this can never escape onto the page. */
+    z-index: -1;
+    pointer-events: none;
+    /* Two blobs, not one: the trend on every template site is a mesh, not a
+       flat sheet — a soft accent glow top-right and a fainter full-strength
+       one bottom-left. Both resolve through the palette, so all forty-two
+       papers get the depth with no colour named here. */
+    background:
+      radial-gradient(
+        120% 90% at 88% -10%,
+        color-mix(in srgb, var(--slide-accent-soft) 16%, transparent) 0%,
+        transparent 62%
+      ),
+      radial-gradient(
+        90% 80% at 8% 108%,
+        color-mix(in srgb, var(--slide-accent) 10%, transparent) 0%,
+        transparent 60%
+      );
+  }
+
+  .scene-on-cover .scene-wash {
+    background: radial-gradient(
+      90% 70% at 50% 8%,
+      color-mix(in srgb, var(--slide-accent-soft) 22%, transparent) 0%,
+      transparent 70%
+    );
+  }
+
+  .scene-on-statement .scene-wash {
+    background: radial-gradient(
+      85% 75% at 4% 100%,
+      color-mix(in srgb, var(--slide-accent-soft) 14%, transparent) 0%,
+      transparent 66%
+    );
+  }
+
+  .scene-on-image-left .scene-wash {
+    background: radial-gradient(
+      80% 80% at 100% 100%,
+      color-mix(in srgb, var(--slide-accent-soft) 13%, transparent) 0%,
+      transparent 64%
+    );
+  }
+
+  .scene-on-image-right .scene-wash {
+    background: radial-gradient(
+      80% 80% at 0% 100%,
+      color-mix(in srgb, var(--slide-accent-soft) 13%, transparent) 0%,
+      transparent 64%
+    );
+  }
+
+  /* Two columns and cards carry their own blocks; a wash would fight them. */
+  .scene-on-two-col .scene-wash,
+  .scene-on-cards .scene-wash,
+  .scene-on-full-figure .scene-wash {
+    background: none;
+  }
+
+  /*
+   * The warm layouts get the strongest wash of all: these are the slides where
+   * there is only one idea on the page, so the paper itself can carry some of
+   * the colour.
+   */
+  .scene-on-spotlight .scene-wash {
+    background: radial-gradient(
+      100% 80% at 50% 6%,
+      color-mix(in srgb, var(--slide-accent-soft) 26%, transparent) 0%,
+      transparent 66%
+    );
+  }
+
+  .scene-on-quote .scene-wash {
+    background: radial-gradient(
+      90% 70% at 50% 0%,
+      color-mix(in srgb, var(--slide-accent-soft) 20%, transparent) 0%,
+      transparent 70%
+    );
+  }
+
+  .scene-on-flow .scene-wash {
+    background: radial-gradient(
+      70% 60% at 0% 0%,
+      color-mix(in srgb, var(--slide-accent-soft) 16%, transparent) 0%,
+      transparent 64%
+    );
+  }
+
+  .scene-on-compare .scene-wash {
+    background: radial-gradient(
+      70% 60% at 100% 100%,
+      color-mix(in srgb, var(--slide-accent-soft) 16%, transparent) 0%,
+      transparent 64%
+    );
+  }
+
+  /*
+   * Background patterns, in the paper's own accent.
+   *
+   * Six treatments from the template sites (Memphis dots, blueprint grid,
+   * duotone bands, corner rings, mesh waves), each drawn only with palette
+   * roles — no colour is named, so one rule serves all forty-two papers.
+   * The base glow rides along as the last layer so a patterned slide keeps
+   * its depth.
+   *
+   * Specificity (0,3,0) beats the layout washes above on purpose: when the
+   * teacher picks a pattern, the pattern is the decoration.
+   */
+  .slide-fitted[data-pattern="dots"] .scene-wash {
+    background:
+      radial-gradient(
+        color-mix(in srgb, var(--slide-accent-soft) 30%, transparent) 1.2px,
+        transparent 1.3px
+      ),
+      radial-gradient(
+        120% 90% at 88% -10%,
+        color-mix(in srgb, var(--slide-accent-soft) 16%, transparent) 0%,
+        transparent 62%
+      );
+    background-size:
+      2.6cqw 2.6cqw,
+      auto;
+  }
+
+  .slide-fitted[data-pattern="grid"] .scene-wash {
+    background:
+      linear-gradient(
+        color-mix(in srgb, var(--slide-rule) 42%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--slide-rule) 42%, transparent) 1px,
+        transparent 1px
+      ),
+      radial-gradient(
+        120% 90% at 88% -10%,
+        color-mix(in srgb, var(--slide-accent-soft) 16%, transparent) 0%,
+        transparent 62%
+      );
+    background-size:
+      100% 3cqw,
+      3cqw 100%,
+      auto;
+  }
+
+  .slide-fitted[data-pattern="bands"] .scene-wash {
+    background:
+      linear-gradient(
+        135deg,
+        transparent 58%,
+        color-mix(in srgb, var(--slide-accent) 16%, transparent) 58%,
+        color-mix(in srgb, var(--slide-accent) 16%, transparent) 74%,
+        color-mix(in srgb, var(--slide-accent-soft) 26%, transparent) 74%
+      ),
+      radial-gradient(
+        120% 90% at 88% -10%,
+        color-mix(in srgb, var(--slide-accent-soft) 16%, transparent) 0%,
+        transparent 62%
+      );
+  }
+
+  .slide-fitted[data-pattern="rings"] .scene-wash {
+    background:
+      repeating-radial-gradient(
+        circle at 88% 6%,
+        transparent 0,
+        transparent 3.1cqw,
+        color-mix(in srgb, var(--slide-accent-soft) 22%, transparent) 3.1cqw,
+        color-mix(in srgb, var(--slide-accent-soft) 22%, transparent) 3.25cqw
+      ),
+      radial-gradient(
+        120% 90% at 88% -10%,
+        color-mix(in srgb, var(--slide-accent-soft) 16%, transparent) 0%,
+        transparent 62%
+      );
+  }
+
+  .slide-fitted[data-pattern="waves"] .scene-wash {
+    background:
+      radial-gradient(
+        55% 48% at 10% 102%,
+        color-mix(in srgb, var(--slide-accent) 14%, transparent) 0%,
+        transparent 70%
+      ),
+      radial-gradient(
+        48% 42% at 92% 4%,
+        color-mix(in srgb, var(--slide-accent-soft) 18%, transparent) 0%,
+        transparent 70%
+      ),
+      radial-gradient(
+        120% 90% at 88% -10%,
+        color-mix(in srgb, var(--slide-accent-soft) 16%, transparent) 0%,
+        transparent 62%
+      );
+  }
+
+  /*
+   * A hairline frame. The slide sits inside the room, and this is the edge of
+   * the paper itself — one pixel of the theme's own rule colour, so a dark
+   * theme gets a light edge and a paper theme a dark one.
+   */
+  .slide-fitted {
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, var(--slide-rule) 70%, transparent);
+  }
+
+  /*
+   * Cards and pictures get depth: a rounded block, a hairline, and a shadow
+   * built from the theme's ink, which is a soft dark on paper and a soft glow
+   * on an ink theme.
+   */
+  .scene-layout-cards .scene-bullet {
+    border: 1px solid color-mix(in srgb, var(--slide-rule) 85%, transparent);
+    box-shadow: 0 0.5cqw 1.4cqw
+      color-mix(in srgb, var(--slide-ink) 12%, transparent);
+  }
+
+  .scene-split-figure,
+  .scene-layout-image-left .scene-image,
+  .scene-layout-image-right .scene-image,
+  .scene-layout-full-figure .scene-image {
+    border-radius: 1.1cqw;
+    overflow: hidden;
+  }
+
+  .scene-split-figure img,
+  .scene-layout-image-left .scene-image img,
+  .scene-layout-image-right .scene-image img,
+  .scene-layout-full-figure .scene-image img {
+    box-shadow: 0 0.8cqw 2cqw
+      color-mix(in srgb, var(--slide-ink) 16%, transparent);
+  }
+
+  /*
+   * A warm register.
+   *
+   * The layouts above are a geometry: rules, columns, cards. These are the
+   * touches that stop a slide reading like a form — the kicker becomes a chip
+   * rather than a label, the corner gets a soft ring instead of a hard border,
+   * and the shapes that hold text round off further. Everything is drawn from
+   * the slide's own palette, so the warm register follows the theme instead of
+   * fighting it.
+   */
+  .slide-fitted .scene-kicker {
+    padding: 0.45cqw 1.15cqw;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--slide-accent) 11%, transparent);
+  }
+
+  /*
+   * Spotlight: one idea, and the slide gets out of its way. The claim is set
+   * much larger than any other title, the supports underneath it stay small,
+   * and the ring behind is pure decoration — aria-hidden, never content.
+   */
+  .scene-layout-spotlight .scene-fit {
+    gap: 1.2cqw;
+  }
+
+  .scene-layout-spotlight .scene-head,
+  .scene-layout-spotlight .scene-body {
+    margin-inline: auto;
+    text-align: center;
+  }
+
+  .scene-layout-spotlight .scene-head {
+    max-width: 92%;
+  }
+
+  .scene-layout-spotlight .scene-title {
+    font-size: calc(6.6cqw * var(--slide-fit, 1));
+    line-height: 1.02;
+  }
+
+  .scene-layout-spotlight .scene-rule {
+    margin-inline: auto;
+    width: 9%;
+  }
+
+  .scene-layout-spotlight .scene-body {
+    grid-template-columns: 1fr;
+    max-width: 72%;
+    gap: 0.9cqw;
+  }
+
+  /*
+   * Quote: the slide lends its middle to a sentence someone said. The words are
+   * set large and centred with the source underneath in the accent, which is how
+   * a pull-quote is set in print.
+   */
+  .scene-layout-quote .scene-fit {
+    gap: 1cqw;
+  }
+
+  .scene-layout-quote .scene-head,
+  .scene-layout-quote .scene-body {
+    margin-inline: auto;
+    text-align: center;
+  }
+
+  .scene-layout-quote .scene-head {
+    max-width: 88%;
+  }
+
+  .scene-layout-quote .scene-title {
+    font-size: calc(4.4cqw * var(--slide-fit, 1));
+    line-height: 1.12;
+    font-weight: 600;
+  }
+
+  .scene-layout-quote .scene-sub {
+    font-size: calc(1.5cqw * var(--slide-fit, 1));
+    color: var(--slide-accent);
+  }
+
+  .scene-layout-quote .scene-rule {
+    margin-inline: auto;
+    width: 12%;
+  }
+
+  .scene-layout-quote .scene-body {
+    grid-template-columns: 1fr;
+    max-width: 68%;
+  }
+
+  /*
+   * Flow: the steps become stations on a line. The connector is drawn by the
+   * list itself so the arrow always sits between two real steps, whatever
+   * height the type settles at.
+   */
+  .scene-layout-flow .scene-body,
+  .scene-layout-flow .scene-steps {
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 1.4cqw;
+    max-width: 92%;
+  }
+
+  .scene-layout-flow .scene-bullet,
+  .scene-layout-flow .scene-step {
+    position: relative;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5cqw;
+    padding: 1.4cqw 1.5cqw;
+    border-top: 0;
+    border-radius: 1.4cqw;
+    background: var(--slide-bg-sunk);
+    color: var(--slide-ink);
+  }
+
+  .scene-layout-flow .scene-bullet::after,
+  .scene-layout-flow .scene-step::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -1.4cqw;
+    width: 1.4cqw;
+    /* Dashed, like the sample decks' connector lines: a solid hairline reads
+       as a divider, dashes read as a path between stations. */
+    border-top: 2px dashed
+      color-mix(in srgb, var(--slide-accent-soft) 75%, transparent);
+  }
+
+  .scene-layout-flow .scene-bullet:last-child::after,
+  .scene-layout-flow .scene-step:last-child::after {
+    display: none;
+  }
+
+  /* The number leads the card here, so it needs its own row, not a baseline.
+     Catalog process pages (346/347) set the numeral big in the accent: the
+     station reads as "3" first and words second. */
+  .scene-layout-flow .scene-bullet-index,
+  .scene-layout-flow .scene-step-index {
+    font-size: calc(2.1cqw * var(--slide-fit, 1));
+    font-weight: 800;
+    letter-spacing: 0;
+    color: var(--slide-accent);
+  }
+
+  /* The node where the connector leaves the station: a filled disc at the
+     middle of the gap, so the rail reads as stations on a line rather than
+     cards with a hairline between them. None on the last station — its rail
+     is hidden too, and a floating dot would be a decoration without a job. */
+  .scene-layout-flow .scene-bullet::before,
+  .scene-layout-flow .scene-step::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -0.975cqw;
+    width: 0.55cqw;
+    height: 0.55cqw;
+    margin-top: -0.275cqw;
+    border-radius: 999px;
+    background: var(--slide-accent);
+  }
+
+  .scene-layout-flow .scene-bullet:last-child::before,
+  .scene-layout-flow .scene-step:last-child::before {
+    display: none;
+  }
+
+  /*
+   * Compare: two sides and the line between them. The rule is drawn by the
+   * list's own column gap, so it stays put when the bullets change length.
+   */
+  .scene-layout-compare .scene-body {
+    column-gap: 7%;
+    max-width: 88%;
+  }
+
+  .scene-layout-compare .scene-bullet {
+    padding: 1.2cqw 1.4cqw;
+    border-top: 0;
+    border-radius: 1.2cqw;
+    background: color-mix(in srgb, var(--slide-bg-sunk) 70%, transparent);
+  }
+
+  .scene-layout-compare .scene-body > :nth-child(even) {
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, var(--slide-rule) 70%, transparent);
+  }
+
+  /*
+   * The ornament: a ring behind the claim, or the opening quote mark. Position
+   * from the corner the layout's wash already uses, so the two read as one
+   * gesture instead of two.
+   */
+  .scene-ornament {
+    position: absolute;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: 999px;
+  }
+
+  .scene-ornament-spotlight {
+    top: -6cqw;
+    left: 50%;
+    width: 30cqw;
+    height: 30cqw;
+    transform: translateX(-50%);
+    border: 1.4cqw solid
+      color-mix(in srgb, var(--slide-accent-soft) 22%, transparent);
+  }
+
+  .scene-ornament-quote {
+    top: -2cqw;
+    left: 50%;
+    width: 13cqw;
+    height: 13cqw;
+    transform: translateX(-50%);
+    background: color-mix(in srgb, var(--slide-accent-soft) 16%, transparent);
+  }
+
+  .scene-layout-spotlight,
+  .scene-layout-quote {
+    position: relative;
+  }
+
+  /*
+   * The function graph: same hairline rhythm as bullets and steps, with the
+   * curve in the slide accent and asymptotes dashed in the soft accent — the
+   * dash is what says "not part of the curve".
+   */
+  .scene-graph {
+    flex-shrink: 0;
+    border-top: 1px solid var(--slide-rule);
+    padding-top: 1.5cqw;
+  }
+
+  .scene-graph-hint {
+    margin-top: 1cqw;
+    font-family: var(--font-mono);
+    font-size: 1.1cqw;
+    color: var(--slide-ink-faint);
+  }
+
+  /* Click-to-zoom: a small "Phóng to" control under the figure, and a modal
+     that re-mounts the same figure larger. */
+  .scene-zoom {
+    flex-shrink: 0;
+  }
+
+  .scene-zoom-body {
+    min-width: 0;
+  }
+
+  .scene-zoom-open {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.8cqw;
+    margin-top: 1cqw;
+    font-size: 1.1cqw;
+    color: var(--slide-ink-faint);
+    cursor: pointer;
+  }
+
+  .scene-zoom-open:hover {
+    color: var(--slide-accent);
+  }
+
+  .scene-zoom-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4vmin;
+    background: rgb(0 0 0 / 0.72);
+  }
+
+  .scene-zoom-modal {
+    /* Default paper only: the modal lives outside the slide, so the theme
+       registry's inline vars never reach it. The zoomed figure keeps the
+       default-paper colours rather than inheriting nothing. */
+    --slide-bg: #efe9dd;
+    --slide-bg-sunk: #e7e0d1;
+    --slide-ink: #17150f;
+    --slide-ink-soft: #5d564a;
+    --slide-ink-faint: #8d8477;
+    --slide-rule: #cfc5b2;
+    --slide-accent: #9a3324;
+    --slide-accent-soft: #c4695a;
+    position: relative;
+    width: min(92vw, 880px);
+    max-height: 88vh;
+    overflow-y: auto;
+    background: var(--slide-bg);
+    color: var(--slide-ink);
+    border-radius: 1.2rem;
+    padding: 3.2rem 2.4rem 2rem;
+  }
+
+  .scene-zoom-close {
+    position: absolute;
+    top: 0.9rem;
+    right: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 9999px;
+    border: 1px solid var(--slide-rule);
+    color: var(--slide-ink-soft);
+    cursor: pointer;
+  }
+
+  .scene-zoom-close:hover {
+    color: var(--slide-accent);
+    border-color: var(--slide-accent);
+  }
+
+  /*
+   * The caption. Sized against the slide so it is legible in fullscreen and
+   * unobtrusive in a small embed, and capped to three lines — see the note where
+   * it is mounted.
+
+   * No pill. A caption in this style is a line of type sitting on the paper, and
+   * a rounded panel behind it would be the heaviest thing on an otherwise empty
+   * slide. The shadow that used to be here is what kept it legible over a busy
+   * figure; a text shadow does the same for a fraction of the visual noise.
+   */
+  .scene-narration {
+    /* Bigger than the body copy and rounded: the caption is read as it is spoken,
+       at a glance, from a seat — it is closer to a teleprompter than to a
+       footnote, and the old 1.25cqw sat below the bullet size. */
+    font-size: 1.65cqw;
+    line-height: 1.34;
+    font-weight: 500;
+    letter-spacing: 0.005em;
+    color: var(--slide-ink);
+  }
+
+  /*
+   * The caption's two rows, held open at all times.
+   *
+   * The caption sits above a fixed bottom edge, so its height is also its top
+   * edge: any change in height moves every line on screen. It changed twice —
+   * when a sentence wrapped to two lines instead of one, and when the "next
+   * sentence" line disappeared at the end of a scene. Both read as a stutter
+   * exactly at the moment the reader is following the hand-over.
+   *
+   * Reserving the rows up front is the fix. The block is always tall enough for
+   * a live line and a held-back one, and the held-back line is rendered even
+   * when there is no next sentence, just invisible. Nothing about the height
+   * depends on the text any more, so the hand-over only ever changes colour.
+   */
+  .scene-caption-stack {
+    /* One row of caption type: 1.65cqw of type at a 1.34 line-height. */
+    --caption-row: 2.21cqw;
+    min-height: calc(var(--caption-row) * 2 + 0.5cqw);
+    padding-bottom: 0.3cqw;
+  }
+
+  /* The sentence coming next. Faint rather than small, so the hand-over does not
+     move anything: same size, less weight, and it is replaced rather than
+     resized when its turn comes. */
+  .scene-narration-next {
+    font-size: 1.65cqw;
+    line-height: 1.34;
+    font-weight: 500;
+    letter-spacing: 0.005em;
+    color: var(--slide-ink-faint);
+  }
+
+  /*
+   * The caption's three word states, in the slide's own palette.
+   *
+   * They are here rather than as Tailwind data-[] variants on the element
+   * because the colours are theme variables, and a variant would have to spell
+   * out both papers at each call site — which is how the caption ended up as
+   * white text on a white slide. The spoken words stay muted and the current word
+   * takes the accent, so the eye tracks the accent instead of re-reading.
+   */
+  /*
+   * The words themselves.
+   *
+   * Only `color` transitions, and only for a moment. Anything that touches
+   * layout — padding, radius, a weight change — makes the line reflow on every
+   * single word boundary, which is what made the caption look like it was
+   * struggling rather than keeping pace. The 1px of side padding is constant
+   * across all three states, so it costs nothing per word and keeps the glyphs
+   * off each other on a dense Vietnamese line.
+   *
+   * `will-change` is not set here on purpose: there is one span per word per
+   * sentence, and promoting dozens of them to their own layer costs more memory
+   * than the paint it saves. Colour changes on text this small are cheap.
+   */
+  .scene-narration span {
+    padding: 0 1px;
+    transition: color 90ms linear;
+  }
+
+  .scene-narration span[data-state="idle"] {
+    color: var(--slide-ink-faint);
+  }
+
+  .scene-narration span[data-state="said"] {
+    color: var(--slide-ink-soft);
+  }
+
+  /*
+   * The current word, marked WITHOUT changing font weight.
+   *
+   * This was `font-weight: 700` and it is the reason the caption jittered. A
+   * weight change re-shapes the glyphs, so the whole line reflows and every
+   * following word slides sideways as the voice walks the sentence — a 300ms
+   * wander on each handover that no amount of easing hides, because the layout
+   * genuinely moves rather than the paint. The accent colour already carries
+   * "this word is being spoken now", so the weight was buying emphasis at the
+   * cost of a stable line.
+   */
+  .scene-narration span[data-state="now"] {
+    color: var(--slide-accent);
+  }
+
+  /* Floating Subtitle Card: replicates the crisp white pill caption from the lesson presentation sample */
+  .floating-subtitle-card {
+    display: inline-block;
+    max-width: 92%;
+    background-color: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 1.25rem;
+    padding: 0.75cqw 2cqw;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(8px);
+  }
+
+  .floating-subtitle-card .scene-narration {
+    color: #0f172a;
+    font-weight: 600;
+  }
+
+  .floating-subtitle-card .scene-narration span[data-state="idle"] {
+    color: #64748b;
+  }
+
+  .floating-subtitle-card .scene-narration span[data-state="said"] {
+    color: #0f172a;
+  }
+
+  .floating-subtitle-card .scene-narration span[data-state="now"] {
+    color: #0284c7;
+    text-shadow: 0 0 1px rgba(2, 132, 199, 0.4);
+  }
+
+  /*
+   * The teacher's pointer: a dot on the part being read, plus a soft ring
+   * framing it. Both are positioned by `ScenePointer` in stage space, so the
+   * slide's own GSAP transforms never move them.
+   *
+   * The colour is the stage's `--pointer-rgb` variable (`r, g, b`), painted by
+   * `ScenePointer` from the lesson's `pointerColor`. Amber is the fallback, so
+   * a lesson saved before colours existed looks exactly as it always has.
+   *
+   * The target itself gets `data-pointer="on"` and a tinted wash rather than
+   * an outline: outlines on KaTeX and chart bars re-laid the slide, while a
+   * background wash only repaints. The wash is deliberately faint — the dot is
+   * the pointer, the wash is where it points.
+   */
+  /*
+   * The pointer.
+   *
+   * One amber dot that rests on the line being read, a soft halo so the eye can
+   * find it again after it moves, and the faintest warm wash on the words
+   * themselves.
+   *
+   * There was a spotlight here: a hole cut in a dimmed page around whatever the
+   * pointer was on. It read as a search-result highlight — a hard-edged bright
+   * box on a coloured field — which is exactly the wrong register for a lesson.
+   * The pointer is meant to feel like a hand resting on a line, not like a
+   * marker pen on a printout, so the page stays at full strength and only the
+   * line under the voice warms up.
+   */
+  .scene-pointer-dot {
+    transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease;
+  }
+
+  .scene-pointer-dot span {
+    background: radial-gradient(circle, rgba(var(--pointer-rgb, 245, 158, 11), 1) 0%, rgba(var(--pointer-rgb, 245, 158, 11), 0.85) 55%, rgba(var(--pointer-rgb, 245, 158, 11), 0) 75%);
+    box-shadow: 0 0 14px 4px rgba(var(--pointer-rgb, 245, 158, 11), 0.6);
+    animation: scene-pointer-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes scene-pointer-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.25); opacity: 0.88; }
+  }
+
+  /* A halo, not a frame: soft glowing accent that wraps the active card/element */
+  .scene-pointer-ring {
+    border-radius: 12px;
+    border: 1.5px solid rgba(var(--pointer-rgb, 245, 158, 11), 0.7);
+    box-shadow: 0 0 18px 2px rgba(var(--pointer-rgb, 245, 158, 11), 0.25), inset 0 0 10px rgba(var(--pointer-rgb, 245, 158, 11), 0.06);
+    transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), width 280ms cubic-bezier(0.2, 0.8, 0.2, 1), height 280ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease;
+  }
+
+  /*
+   * The move.
+   *
+   * When the pointer lands on a new line it pings: the frame of the new target
+   * opens outward once and fades.
+   */
+  .scene-pointer-ping {
+    border: 1.5px solid rgba(var(--pointer-rgb, 245, 158, 11), 0.6);
+    border-radius: 12px;
+    opacity: 0;
+  }
+
+  .scene-pointer-ping-on {
+    animation: scene-pointer-ping 620ms ease-out both;
+  }
+
+  @keyframes scene-pointer-ping {
+    0% {
+      opacity: 0.75;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.05);
+    }
+  }
+
+  [data-pointer="on"] {
+    background-color: rgba(var(--pointer-rgb, 245, 158, 11), 0.08) !important;
+    border-color: rgba(var(--pointer-rgb, 245, 158, 11), 0.5) !important;
+    box-shadow: 0 4px 18px -2px rgba(var(--pointer-rgb, 245, 158, 11), 0.18) !important;
+    transition: background-color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+  }
+
+  /*
+   * Chapter bands on the scrub bar: not-yet-read, being-read, already-read.
+   *
+   * The rail alone answers "how far", which on a nine-minute deck still leaves
+   * the reader unable to tell that whole chapters are behind them. Read chapters
+   * dim and recede, the current one takes the accent, and the border between
+   * them brightens — so the shape of the finished lesson is legible at a glance,
+   * before anyone reads a single label.
+   *
+   * `data-state` is written by the rAF subscription in `ScrubBar` rather than by
+   * React, so these colours change without re-rendering the player every frame.
+   */
+  .scrub-chapter {
+    color: var(--color-mist-500);
+    transition: color 150ms linear, border-color 150ms linear, opacity 150ms linear;
+  }
+
+  .scrub-chapter[data-state="todo"] {
+    opacity: 0.55;
+  }
+
+  .scrub-chapter[data-state="current"] {
+    /* The 400 step of the brand ramp, not 200/300. The rail this sits on is
+       mid-to-dark in both colour schemes, and the lighter steps of a saturated
+       teal/blue ramp lose contrast against it — the label reads as disabled
+       rather than current. 400 is the lightest step that stays legible. */
+    color: var(--color-brand-400);
+    border-left-color: var(--color-brand-300);
+    opacity: 1;
+  }
+
+  /* Read: dimmed to the faint ink so the unread remainder reads as what's left. */
+  .scrub-chapter[data-state="passed"] {
+    color: var(--color-ink-500);
+    border-left-color: var(--color-ink-600);
+    opacity: 0.7;
+  }
+
+  /*
+   * The icon ahead of the kicker.
+   *
+   * `1.7em` rather than a `cqw` so it tracks whatever the kicker's font size is,
+   * and `flex-shrink: 0` because the row must never let the glyph be squeezed by
+   * a long Vietnamese kind label beside it.
+   */
+  .scene-kicker-icon {
+    width: 1.7em;
+    height: 1.7em;
+    flex-shrink: 0;
+    stroke-width: 1.75;
+  }
+
+  /* The slide number, and the rule it sits on. Faint on purpose — it is a
+     position marker, not content. */
+  .scene-watermark {
+    font-size: 0.95cqw;
+    color: var(--slide-ink-faint);
+  }
+
+  /*
+   * Figures share the slide's width budget. They used to be capped at
+   * `max-w-2xl`, which on a fullscreen slide left a chart a third the width of
+   * the paper it was drawn on.
+   */
+  .scene-formula,
+  .scene-table,
+  .scene-data,
+  .scene-figure {
+    width: 100%;
+    max-width: 86%;
+  }
+
+  .scene-formula {
+    font-size: 2.6cqw;
+    padding: 0.9cqw;
+    color: var(--slide-ink);
+    /* A display-mode KaTeX block is one unbreakable line of a fixed height, so
+       on a short slide it is the element that pushes everything below it off
+       the bottom. Shrinking lets it give way instead. */
+    min-height: 0;
+    max-width: 100%;
+  }
+
+  /*
+   * The quiz.
+   *
+   * Sized in `cqw` and coloured from the slide palette, so it belongs to the
+   * paper it is sitting on. The web version of this block used the app's dark
+   * chrome (`ink-900`, `text-sm`, `p-5`), which is how a black rectangle came to
+   * sit on a cream slide and how four short answer rows came to take 412px of a
+   * 468px card.
+   */
+  .scene-quiz {
+    width: 100%;
+    max-width: 86%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9cqw;
+    color: var(--slide-ink);
+  }
+
+  .scene-quiz-kicker {
+    display: flex;
+    align-items: center;
+    gap: 0.4cqw;
+    font-size: 1.05cqw;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--slide-accent);
+  }
+
+  .scene-quiz-question {
+    font-size: 1.75cqw;
+    line-height: 1.3;
+    font-weight: 700;
+  }
+
+  .scene-quiz-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7cqw;
+  }
+
+  .scene-quiz-option {
+    display: flex;
+    align-items: center;
+    gap: 0.7cqw;
+    /* Padding is a fixed fraction of the slide, not a rem constant, so a 10px
+       row here and a 40px row on a fullscreen slide are the same design. */
+    padding: 0.7cqw 0.9cqw;
+    border: 1px solid var(--slide-rule);
+    border-radius: 0.7cqw;
+    background: var(--slide-bg-sunk);
+    color: var(--slide-ink-soft);
+    font-size: 1.3cqw;
+    line-height: 1.25;
+    text-align: left;
+    transition: border-color 120ms, background-color 120ms, color 120ms;
+  }
+
+  .scene-quiz-letter {
+    display: flex;
+    width: 1.7cqw;
+    height: 1.7cqw;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid var(--slide-rule);
+    font-family: var(--font-mono);
+    font-size: 0.95cqw;
+  }
+
+  .scene-quiz-option[data-state="picked"] {
+    border-color: var(--slide-accent);
+    background: var(--slide-accent-soft);
+    color: var(--slide-ink);
+    font-weight: 600;
+  }
+
+  .scene-quiz-option[data-state="correct"] {
+    border-color: var(--slide-accent);
+    color: var(--slide-ink);
+    font-weight: 600;
+  }
+
+  .scene-quiz-option[data-state="wrong"] {
+    border-color: var(--slide-ink-faint);
+    color: var(--slide-ink-soft);
+  }
+
+  .scene-quiz-option[data-state="dim"] {
+    opacity: 0.45;
+  }
+
+  .scene-quiz-feedback {
+    font-size: 1.15cqw;
+    line-height: 1.35;
+    color: var(--slide-ink-soft);
+    border-left: 0.2cqw solid var(--slide-rule);
+    padding-left: 0.8cqw;
+  }
+
+  .scene-quiz-feedback[data-state="correct"] {
+    border-left-color: var(--slide-accent);
+  }
+
+  .scene-quiz-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  /* Where the "try again" button used to sit: the wait before the next slide.
+     Same slot, same rhythm, no control to press. */
+  .scene-quiz-auto {
+    font-size: 1.05cqw;
+    font-weight: 600;
+    color: var(--slide-ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .scene-quiz-button {
+    padding: 0.55cqw 1.2cqw;
+    border-radius: 0.6cqw;
+    border: 1px solid var(--slide-rule);
+    font-size: 1.15cqw;
+    font-weight: 600;
+    color: var(--slide-ink-soft);
+    transition: border-color 120ms, color 120ms;
+  }
+
+  .scene-quiz-button[data-primary] {
+    border-color: var(--slide-accent);
+    background: var(--slide-accent);
+    color: var(--slide-bg);
+  }
+
+  .scene-quiz-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .scene-quiz-steps {
+    display: flex;
+    gap: 0.35cqw;
+  }
+
+  .scene-quiz-step {
+    height: 0.5cqw;
+    flex: 1;
+    border-radius: 999px;
+    background: var(--slide-rule);
+  }
+
+  .scene-quiz-step[data-state="current"] {
+    background: var(--slide-accent-soft);
+  }
+
+  .scene-quiz-step[data-state="done-correct"] {
+    background: var(--slide-accent);
+  }
+
+  .scene-quiz-step[data-state="done-wrong"] {
+    background: var(--slide-ink-faint);
+  }
+
+  .scene-quiz-score {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3cqw;
+    font-size: 1.5cqw;
+    font-weight: 700;
+  }
+
+  .scene-quiz-praise {
+    font-size: 1.1cqw;
+    font-weight: 400;
+    color: var(--slide-ink-soft);
+  }
+
+  .scene-quiz-count {
+    margin-left: auto;
+    font-size: 1.05cqw;
+    font-weight: 600;
+    color: var(--slide-ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .scene-mindmap {
+    width: 100%;
+    max-width: 86%;
+    display: flex;
+    flex-direction: column;
+    gap: 1cqw;
+    color: var(--slide-ink);
+  }
+
+  .scene-mindmap-kicker {
+    font-size: 1.05cqw;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--slide-accent);
+  }
+
+  .scene-mindmap-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6cqw;
+    margin-left: 0.4cqw;
+  }
+
+  .scene-mindmap-branch {
+    display: flex;
+    gap: 0.7cqw;
+    position: relative;
+    padding-left: 1.1cqw;
+  }
+
+  .scene-mindmap-dot {
+    position: absolute;
+    left: 0;
+    top: 0.42cqw;
+    width: 0.55cqw;
+    height: 0.55cqw;
+    border-radius: 999px;
+    background: var(--slide-rule);
+  }
+
+  .scene-mindmap-branch[data-fresh="true"] .scene-mindmap-dot {
+    background: var(--slide-accent);
+  }
+
+  .scene-mindmap-body {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .scene-mindmap-label {
+    font-size: 1.25cqw;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  .scene-mindmap-branch[data-fresh="true"] .scene-mindmap-label {
+    color: var(--slide-accent);
+  }
+
+  .scene-mindmap-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25cqw 1.1cqw;
+    margin-top: 0.25cqw;
+    font-size: 1cqw;
+    color: var(--slide-ink-soft);
+  }
+
+  .scene-mindmap-items li::before {
+    content: "• ";
+    color: var(--slide-accent-soft);
+  }
+
+  .scene-mindmap-branch[data-fresh="true"] .scene-mindmap-items {
+    color: var(--slide-ink);
+  }
+
+  .scene-table {
+    font-size: 1.35cqw;
+    color: var(--slide-ink-soft);
+  }
+
+  /*
+   * The last resort for a slide that is still too tall once the type has reached
+   * its floor: the tables and diagrams get a box of their own and scroll inside
+   * it. Without this the fit pass had nowhere left to give — it can shrink the
+   * type and it can drop the picture, and a slide with a long table and no
+   * picture is left with neither — so the block overflowed and the last rows were
+   * printed through the caption. Capping the box keeps every row reachable with
+   * a scroll instead of losing it silently.
+   */
+  .scene-card[data-crowded="true"] :is(.scene-table, .scene-zoom) {
+    max-height: 26cqw;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* The caption is the one thing that must never be covered, so it sits above
+     whatever the fit pass decided to shrink. */
+  .scene-card[data-crowded="true"] .scene-caption-stack {
+    position: relative;
+    z-index: 20;
+  }
+
+  /* And the last case: a slide so full that even the capped boxes and the floor
+     scale do not fit. The column scrolls rather than running under the caption —
+     the slide stays complete, and the type stays at a size that can be read. */
+  .scene-card[data-crowded="true"] .scene-fit {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Table. No filled header row and no zebra: on a light paper a grey band is
+     a block of noise, and on a dark one the light-ink banding inverted into
+     something that looked like a bug. A rule under the header does the job the
+     band was doing, and works on both. */
+  .scene-th {
+    border-bottom-color: var(--slide-ink);
+    padding: 0.38em 0.9em 0.38em 0;
+    font-weight: 700;
+    color: var(--slide-ink);
+  }
+
+  /*
+   * Row padding is the only lever a data table has, and it was the reason a
+   * seven-row table overran the card: at 0.55em a row measured 33px, and eight of
+   * them plus the slide's own heading and subtitle do not fit a 16:9 card. The
+   * rule under each row already separates them, so the padding only has to clear
+   * the descenders.
+   */
+  .scene-td {
+    border-bottom-color: var(--slide-rule);
+    padding: 0.34em 0.9em 0.34em 0;
+  }
+
+  .scene-td.font-semibold {
+    color: var(--slide-ink);
+  }
+
+  .scene-caption {
+    font-size: 0.95cqw;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--slide-ink-faint);
+  }
+
+  .scene-chart-label {
+    font-size: 1.05cqw;
+    color: var(--slide-ink-soft);
+  }
+
+  .scene-chart-value {
+    font-size: 1.1cqw;
+    font-weight: 600;
+    color: var(--slide-ink);
+  }
+
+  .scene-chart-unit {
+    color: var(--slide-ink-faint);
+  }
+
+  .scene-figure {
+    /* Keeps an image from growing taller than the slide it is on. */
+    max-height: 58%;
+    object-fit: contain;
+  }
+
+  /*
+   * The picture column. It is a fixed fraction of the slide so a fullscreen
+   * slide shows a big image and an embedded one a small one, instead of the
+   * image staying thumbnail-sized on a wall of white.
+   */
+  .scene-image {
+    width: 100%;
+    max-width: calc(44cqw * var(--slide-fit, 1));
+    align-self: center;
+    flex: 0 1 auto;
+    min-height: 0;
+    z-index: 1;
+    margin-inline: auto;
+  }
+
+  .scene-image img {
+    max-width: 100%;
+    max-height: calc(32cqw * var(--slide-fit, 1));
+    width: 100%;
+    height: 100%;
+    margin-inline: auto;
+    object-fit: cover;
+  }
+
+  .scene-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4cqw;
+    width: 100%;
+    max-width: 92%;
+    margin-inline: auto;
+    align-items: center;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .scene-split-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1.2cqw;
+    min-height: 0;
+    width: 100%;
+  }
+
+  .scene-split-figure {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 0;
+  }
+
+  .scene-split-figure .scene-image {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* A crowded slide keeps a small picture before it keeps none: 14cqw is small
+     enough to leave the words their paper and still large enough to read at a
+     glance, which is what a picture on a slide is for. The fit pass sets this. */
+  .scene-card[data-small-figure] .scene-image img {
+    max-height: calc(14cqw * var(--slide-fit, 1));
+  }
+
+  /* A slide whose words fill the paper even at the smallest step keeps its words
+     and loses the picture. The fit pass sets this; see `SlideSurface`. */
+  .scene-card[data-no-figure] .scene-image {
+    display: none;
+  }
+
+  .scene-image figcaption {
+    font-size: 0.9cqw;
+  }
+
+  /*
+   * The interactive 3D model, sized like the picture column.
+   *
+   * It was a fixed `h-56` canvas inside a `max-w-xl` box, which is the one thing
+   * on a slide that could not give way: the type stepped down through the whole
+   * ladder, the column stayed 224px tall, and the card clipped the model at the
+   * bottom edge. Everything here is `cqw * var(--slide-fit)` so the model shrinks
+   * with the words, and `min-height: 0` plus `flex: 0 1 auto` is what lets the
+   * fit pass squeeze it when even the smallest step is not enough.
+   */
+  .scene-sim {
+    /*
+     * The box itself, laid out here rather than with `flex` in the class list:
+     * a Tailwind `display` utility lives in the utilities layer, which outranks
+     * this one whatever its specificity, so `display: none` further down — the
+     * fit pass giving up its last square of room — would have had no effect.
+     */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    /* Padding in `cqw` too: on a small slide a fixed 16px frame plus the slider
+       row is most of the room the model has left. */
+    padding: 1.2cqw;
+    width: calc(30cqw * var(--slide-fit, 1));
+    max-width: 46%;
+    flex: 0 1 auto;
+    min-height: 0;
+    z-index: 1;
+  }
+
+  .scene-sim-canvas {
+    /*
+     * The canvas track: a share of the slide's width, so a big slide gets a big
+     * model and an embedded one a small model rather than a thumbnail.
+     *
+     * `flex: 0 1 auto` and not `flex-1`: a zero basis makes the flex algorithm
+     * own this height and the `height` below is ignored — which is how a panel
+     * that had been given a percentage size ended up 300px tall again.
+     */
+    flex: 0 1 auto;
+    min-height: 0;
+    height: calc(15cqw * var(--slide-fit, 1));
+  }
+
+  .scene-sim canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .scene-card[data-small-figure] .scene-sim {
+    width: calc(20cqw * var(--slide-fit, 1));
+  }
+
+  .scene-card[data-small-figure] .scene-sim-canvas {
+    height: calc(10cqw * var(--slide-fit, 1));
+  }
+
+  /*
+   * The model on an interactive slide is the content, not decoration, so the
+   * fit pass is not allowed to drop it: only a plain figure slide can lose its
+   * picture.
+   */
+  .scene-card[data-no-figure] .scene-fit:not(.scene-has-interactive) .scene-sim {
+    display: none;
+  }
+
+  /*
+   * A slide the reader operates rather than reads.
+   *
+   * A 3D model, a draggable answer, anything with a control in it: stacked under
+   * the words it had nothing left to be. The column wanted its full height, the
+   * bullets wanted theirs, and the card clipped one of them — which is why a
+   * simulation slide used to end with the model hanging off the bottom edge.
+   *
+   * So the head keeps the full width across the top, and what is left becomes two
+   * columns: the words on the left, the interactive panel on the right taking the
+   * height that is actually there. A model that is a fifth of the slide and a row
+   * of three numbers is the arrangement a teacher would draw by hand.
+   */
+  .scene-fit.scene-has-interactive {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    column-gap: 3.5cqw;
+    align-items: start;
+    height: 100%;
+  }
+
+  .scene-fit.scene-has-interactive > .scene-head {
+    grid-column: 1 / -1;
+    text-align: left;
+    margin-inline: 0;
+    max-width: 100%;
+  }
+
+  .scene-fit.scene-has-interactive .scene-title {
+    font-size: calc(3.4cqw * var(--slide-fit, 1));
+    line-height: 1.18;
+    text-align: left;
+  }
+
+  .scene-fit.scene-has-interactive .scene-sub {
+    font-size: calc(1.4cqw * var(--slide-fit, 1));
+    text-align: left;
+  }
+
+  .scene-fit.scene-has-interactive .scene-kicker {
+    margin-left: 0;
+    margin-right: auto;
+  }
+
+  .scene-fit.scene-has-interactive .scene-rule {
+    margin-left: 0;
+    margin-right: auto;
+    width: 100%;
+  }
+
+  .scene-fit.scene-has-interactive > .scene-body,
+  .scene-fit.scene-has-interactive > .scene-steps {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+    grid-template-columns: 1fr !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-inline: 0;
+  }
+
+  /* The panel cell. `stretch` is what gives the model the full height of the
+     row, and the floor keeps it worth looking at on a small slide: below about a
+     seventh of the width, a model is a smudge and the words are better alone. */
+  .scene-has-interactive > .scene-interactive-panel {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    margin-block: 0;
+    width: 100%;
+    max-width: 100%;
+    min-width: 18cqw;
+    min-height: calc(14cqw * var(--slide-fit, 1));
+    max-height: calc(100% - 1cqw);
+  }
+
+  /* An answer list is text, so it takes the full width of its column. */
+  .scene-has-interactive > .scene-interactive-quiz {
+    width: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+
+  .scene-has-interactive > .scene-interactive-panel > .scene-sim {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Height now comes from the cell rather than from a share of the slide width,
+     so the canvas fills whatever the row left over. */
+  .scene-has-interactive .scene-sim-canvas {
+    height: auto;
+    flex: 1 1 auto;
+  }
+
+  .text-gradient-warm {
+    background-image: linear-gradient(
+      100deg,
+      #09090b 4%,
+      #0284c7 45%,
+      #d97706 96%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    display: inline-block;
+    padding-bottom: 0.15em;
+    margin-bottom: -0.15em;
+  }
+
+  html[data-theme="dark"] .text-gradient-warm {
+    background-image: linear-gradient(
+      100deg,
+      #ffffff 4%,
+      #38bdf8 45%,
+      #facc15 96%
+    );
+  }
+
+  .split-word,
+  .split-char {
+    overflow: visible !important;
+  }
+
+  .kbd {
+    @apply inline-flex min-w-[1.75rem] items-center justify-center rounded-md border border-ink-600 bg-ink-800 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-mist-200;
+  }
+}
+
+/* Buttons are real utilities so the variants can `@apply` the shared base. */
+@utility btn {
+  @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45;
+}
+
+@utility btn-primary {
+  @apply btn bg-zinc-950 text-white font-bold hover:bg-zinc-800 shadow-sm active:scale-95 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:shadow-md dark:shadow-white/10;
+}
+
+@utility btn-blue {
+  @apply btn bg-sky-600 text-white font-bold hover:bg-sky-500 shadow-md shadow-sky-600/20 active:scale-95;
+}
+
+@utility btn-gold {
+  @apply btn bg-gold-500 text-white font-bold hover:bg-gold-400 dark:text-zinc-950;
+}
+
+@utility btn-ghost {
+  @apply btn border border-ink-800 bg-ink-900 text-mist-200 hover:border-ink-600 hover:bg-ink-850 hover:text-mist-50 shadow-xs dark:border-ink-600 dark:bg-ink-800/60 dark:hover:border-brand-600 dark:hover:bg-ink-700/70;
+}
+
+/* Hide Next.js dev overlay indicator badge ("N" logo in dev mode) */
+nextjs-portal,
+[data-nextjs-dev-tools-button],
+[data-nextjs-toast],
+#__next-build-watcher {
+  display: none !important;
+}
+
+
+

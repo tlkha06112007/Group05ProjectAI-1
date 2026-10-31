@@ -1,0 +1,218 @@
+import { extractText, getDocumentProxy } from "unpdf";
+import mammoth from "mammoth";
+import * as XLSX from "xlsx";
+import { repairVietnamese, type VietnameseRepair } from "./vietnamese";
+
+export const MAX_UPLOAD_BYTES = 40 * 1024 * 1024;
+/** Hard cap on characters handed to the model, so a 300-page PDF cannot blow up a request. */
+export const MAX_CHARS = 120_000;
+/** Rows kept per spreadsheet sheet; a lesson needs the shape, not the ledger. */
+const MAX_SHEET_ROWS = 12;
+const MAX_SHEET_COLS = 6;
+
+export type DocKind = "pdf" | "docx" | "xlsx" | "text" | "image" | "unsupported";
+
+export interface ExtractedDoc {
+  name: string;
+  kind: DocKind;
+  /**
+   * Markdown following prompt/skills/markitdown.md: `# name` head, `> Trang N/T`
+   * markers for PDFs, `##` headings, real `|` tables for sheets. Empty for a
+   * scanned PDF — that is a real, reportable outcome, not an error.
+   */
+  text: string;
+  chars: number;
+  pages?: number;
+  truncated: boolean;
+  /** Set when the file could not be understood; `text` is then empty. */
+  note?: string;
+  vietnamese: VietnameseRepair;
+}
+
+function detect(name: string, mime: string): DocKind {
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : "";
+  if (ext === ".pdf" || mime === "application/pdf") return "pdf";
+  if (ext === ".docx" || mime.includes("wordprocessingml")) return "docx";
+  if (ext === ".xlsx" || ext === ".xls" || mime.includes("spreadsheetml")) return "xlsx";
+  const extNoDot = ext ? ext.slice(1) : "";
+  if (["txt", "md", "markdown", "csv", "json"].includes(extNoDot)) return "text";
+  if (["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(extNoDot)) return "image";
+  return "unsupported";
+}
+
+/** Collapses PDF layout whitespace without destroying Vietnamese diacritics. */
+function tidy(raw: string): string {
+  return raw
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t ]+/g, " ")
+    .replace(/ ?\n ?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * A line that reads as a heading: numbered (`1.2 Tên mục`) or a short
+ * all-caps line (slide titles). Applied per PDF page so the model can jump
+ * between `##` sections instead of wading through one flat block.
+ */
+function markdownHeadings(page: string): string {
+  return page
+    .split("\n")
+    .map((line) => {
+      const text = line.trim();
+      if (text.length < 3 || text.length > 120) return line;
+      if (/^\d+(\.\d+)*[.)]?\s+\S/.test(text)) return `## ${text}`;
+      const letters = text.replace(/[^A-Za-zÀ-ỹ]/g, "");
+      if (letters.length >= 8 && letters === letters.toUpperCase()) {
+        const title = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+        return `## ${title}`;
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+async function fromPdf(
+  bytes: Uint8Array,
+): Promise<{ text: string; pages: number; note?: string }> {
+  const doc = await getDocumentProxy(bytes);
+  // Per-page (mergePages: false) so each page keeps its `> Trang N/T` marker:
+  // a 300-page textbook merged into one block loses every notion of where a
+  // chapter starts, and the lesson prompt cannot cite "trang 40".
+  const { totalPages, text } = await extractText(doc, { mergePages: false });
+  const pages: string[] = Array.isArray(text) ? text.map(String) : [String(text ?? "")];
+  const merged = pages.map((page) => tidy(page)).filter(Boolean).join("\n");
+  if (merged.trim().length < 20) {
+    return {
+      text: "",
+      pages: totalPages,
+      note: `PDF scan ${totalPages} trang ảnh, không có lớp chữ. Cần OCR mới nạp được.`,
+    };
+  }
+  const body = pages
+    .map((page, index) => {
+      const clean = tidy(page.replace(/\x00/g, ""));
+      if (!clean) return "";
+      return `> Trang ${index + 1}/${totalPages}\n\n${markdownHeadings(clean)}`;
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+  return { text: body, pages: totalPages };
+}
+
+async function fromDocx(bytes: Uint8Array): Promise<{ text: string }> {
+  // Markdown, not raw text: raw text drops every heading, list and table, and
+  // the lesson prompt then cannot tell a definition from a caption.
+  const { value } = await (mammoth as unknown as { convertToMarkdown: (input: { buffer: Buffer }) => Promise<{ value: string }> }).convertToMarkdown({ buffer: Buffer.from(bytes) });
+  return { text: value };
+}
+
+function toMarkdownTable(rows: string[][]): string {
+  const head = rows[0];
+  const lines = [
+    `| ${head.join(" | ")} |`,
+    `| ${head.map(() => "---").join(" | ")} |`,
+  ];
+  for (const row of rows.slice(1)) lines.push(`| ${row.join(" | ")} |`);
+  return lines.join("\n");
+}
+
+function fromSheet(bytes: Uint8Array): { text: string } {
+  const wb = XLSX.read(bytes, { type: "array" });
+  const parts: string[] = [];
+  for (const name of wb.SheetNames.slice(0, 20)) {
+    const sheet = wb.Sheets[name];
+    if (!sheet) continue;
+    const rows = XLSX.utils.sheet_to_json<string[]>(sheet, {
+      header: 1,
+      blankrows: false,
+      defval: "",
+      raw: false,
+    });
+    const grid = rows
+      .map((r) =>
+        r.slice(0, MAX_SHEET_COLS).map((c) => String(c ?? "").trim().replace(/\|/g, "/").replace(/\n+/g, " ").slice(0, 60) || " "),
+      )
+      .filter((r) => r.some((c) => c.trim()))
+      .slice(0, MAX_SHEET_ROWS);
+    if (grid.length < 2) continue;
+    // Pad ragged rows so the markdown table stays rectangular.
+    const width = Math.max(...grid.map((r) => r.length));
+    const rect = grid.map((r) => [...r, ...Array(Math.max(0, width - r.length)).fill(" ")]);
+    parts.push(`## ${name}\n\n${toMarkdownTable(rect)}`);
+  }
+  return { text: parts.join("\n\n") };
+}
+
+export async function extractDocument(
+  file: File,
+): Promise<ExtractedDoc> {
+  const kind = detect(file.name, file.type);
+  const name = file.name;
+  const empty: VietnameseRepair = {
+    text: "", fixed: 0, doubt: 0, impossible: 0, vocab: 1,
+    severe: false, suspect: false, examples: [],
+  };
+
+  if (kind === "image") {
+    return {
+      name, kind, text: "", chars: 0, truncated: false,
+      note: "Ảnh chưa hỗ trợ. Hãy nạp bản PDF/DOCX có lớp chữ.",
+      vietnamese: empty,
+    };
+  }
+  if (kind === "unsupported") {
+    return {
+      name, kind, text: "", chars: 0, truncated: false,
+      note: `Định dạng không hỗ trợ (${name.slice(name.lastIndexOf(".")) || "?"}).`,
+      vietnamese: empty,
+    };
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return {
+      name, kind, text: "", chars: 0, truncated: false,
+      note: `Tệp ${(file.size / 1024 / 1024).toFixed(1)} MB vượt giới hạn 40 MB.`,
+      vietnamese: empty,
+    };
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let raw = "";
+  let pages: number | undefined;
+  let note: string | undefined;
+
+  try {
+    if (kind === "pdf") {
+      const out = await fromPdf(bytes);
+      raw = out.text;
+      pages = out.pages;
+      note = out.note;
+    } else if (kind === "docx") {
+      raw = (await fromDocx(bytes)).text;
+    } else if (kind === "xlsx") {
+      raw = fromSheet(bytes).text;
+    } else {
+      raw = new TextDecoder("utf-8").decode(bytes);
+    }
+  } catch (error) {
+    return {
+      name, kind, text: "", chars: 0, truncated: false,
+      note: `Không đọc được: ${error instanceof Error ? error.message : "lỗi không rõ"}`,
+      vietnamese: empty,
+    };
+  }
+
+  if (!raw.trim() && !note) {
+    note = "Tệp rỗng hoặc không lấy được nội dung.";
+  }
+
+  const repaired = repairVietnamese(tidy(raw));
+  const truncated = repaired.text.length > MAX_CHARS;
+  const text = truncated ? repaired.text.slice(0, MAX_CHARS) : repaired.text;
+
+  return {
+    name, kind, text, chars: text.length, pages, truncated,
+    note, vietnamese: { ...repaired, text: "" },
+  };
+}
