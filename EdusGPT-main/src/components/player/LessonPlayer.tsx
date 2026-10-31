@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -15,6 +15,8 @@ import {
   Volume2,
   Sparkles,
   X,
+  Download,
+  ChevronDown,
 } from "lucide-react";
 import { useTimebase, type LoopRange } from "@/hooks/useTimebase";
 import { chapterIndexAt, sceneIndexAt, type Lesson } from "@/lib/lesson/types";
@@ -138,6 +140,7 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
   const [activeChapter, setActiveChapter] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [aiChatOpen, setAiChatOpen] = useState(true);
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
   const [outlineExpanded, setOutlineExpanded] = useState(false);
 
   useEffect(() => {
@@ -353,6 +356,12 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
     },
     [clearLoop, lesson.id, library, tbPause, tbSeek],
   );
+
+  const onPrevScene = useCallback(() => {
+    if (activeScene > 0) {
+      tbSeek(lesson.scenes[activeScene - 1].start);
+    }
+  }, [activeScene, lesson.scenes, tbSeek]);
 
   const onNextScene = useCallback(() => {
     if (activeScene < lesson.scenes.length - 1) {
@@ -906,73 +915,60 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
 
             {/* Right actions: Export HTML/JSON/SRT, AI chat, Quiz, Flashcards */}
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 shrink-0">
-              {/* One pill, not two bordered buttons: exporting is a single
-                  action ("get this lesson out") with two formats, and two
-                  equal-weight buttons in the corner read as two competing
-                  actions. A dropdown menu would hide the second format and
-                  the toolbar scrolls sideways on narrow windows, which clips
-                  an absolutely-positioned panel — so both segments stay
-                  visible and share one border. */}
-              <div className="inline-flex items-stretch overflow-hidden rounded-xl border border-ink-600 bg-ink-900/60 shadow-sm">
+              {/* Export dropdown */}
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => void exportHtml()}
+                  onClick={() => setExportDropdownOpen((v) => !v)}
                   disabled={exporting}
-                  className="inline-flex items-center gap-1.5 bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-sky-500 active:scale-95 disabled:pointer-events-none disabled:opacity-60"
-                  title={t.playerExportHtmlTitle}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-ink-600 bg-ink-900/60 px-3 py-2 text-xs font-semibold text-mist-200 transition-colors hover:bg-ink-800 hover:text-mist-50 disabled:pointer-events-none disabled:opacity-60"
                 >
                   {exporting ? (
                     <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    <Globe className="h-3.5 w-3.5" />
+                    <Download className="h-3.5 w-3.5" />
                   )}
-                  {t.playerExportHtml}
+                  <span>Xuất</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform ${exportDropdownOpen ? "rotate-180" : ""}`} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void exportLesson()}
-                  disabled={exporting}
-                  className="inline-flex items-center gap-1.5 border-l border-ink-600 px-2.5 py-2 text-xs font-semibold text-mist-200 transition-colors hover:bg-ink-800 hover:text-mist-50 disabled:pointer-events-none disabled:opacity-60"
-                  title={t.playerExportJsonTitle}
-                >
-                  <FileJson className="h-3.5 w-3.5" />
-                  {t.playerExportJson}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void exportSrt()}
-                  disabled={exporting}
-                  className="inline-flex items-center gap-1.5 border-l border-ink-600 px-2.5 py-2 text-xs font-semibold text-mist-200 transition-colors hover:bg-ink-800 hover:text-mist-50 disabled:pointer-events-none disabled:opacity-60"
-                  title={t.playerExportSrtTitle}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  {t.playerExportSrt}
-                </button>
+                {exportDropdownOpen && (
+                  <div
+                    className="absolute right-0 top-full z-50 mt-1.5 min-w-[10rem] overflow-hidden rounded-xl border border-ink-700 bg-ink-900/98 shadow-2xl backdrop-blur-xl"
+                    onMouseLeave={() => setExportDropdownOpen(false)}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { void exportHtml(); setExportDropdownOpen(false); }}
+                      disabled={exporting}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-xs text-mist-200 hover:bg-ink-800 hover:text-mist-50 transition-colors"
+                      title={t.playerExportHtmlTitle}
+                    >
+                      <Globe className="h-3.5 w-3.5 text-sky-400" />
+                      {t.playerExportHtml}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { void exportLesson(); setExportDropdownOpen(false); }}
+                      disabled={exporting}
+                      className="flex w-full items-center gap-2 border-t border-ink-800/60 px-3 py-2.5 text-xs text-mist-200 hover:bg-ink-800 hover:text-mist-50 transition-colors"
+                      title={t.playerExportJsonTitle}
+                    >
+                      <FileJson className="h-3.5 w-3.5 text-amber-400" />
+                      {t.playerExportJson}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { void exportSrt(); setExportDropdownOpen(false); }}
+                      disabled={exporting}
+                      className="flex w-full items-center gap-2 border-t border-ink-800/60 px-3 py-2.5 text-xs text-mist-200 hover:bg-ink-800 hover:text-mist-50 transition-colors"
+                      title={t.playerExportSrtTitle}
+                    >
+                      <FileText className="h-3.5 w-3.5 text-emerald-400" />
+                      {t.playerExportSrt}
+                    </button>
+                  </div>
+                )}
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (!aiChatOpen) {
-                    setAiChatOpen(true);
-                    setOutlineExpanded(false);
-                  } else if (outlineExpanded) {
-                    setOutlineExpanded(false);
-                  } else {
-                    setAiChatOpen(false);
-                  }
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${
-                  aiChatOpen && !outlineExpanded
-                    ? "border-gold-400 bg-gold-400/20 text-gold-200 shadow-sm"
-                    : "border-ink-600 bg-ink-900/60 text-mist-200 hover:border-gold-500/50 hover:text-gold-300"
-                }`}
-                title="Bật/tắt Trợ giảng AI trực tuyến"
-              >
-                <Sparkles className="h-3.5 w-3.5 text-gold-400" />
-                <span>Trợ giảng AI</span>
-              </button>
-
               <Link
                 href={`/quiz?c=${encodeURIComponent(lesson.id)}`}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-gold-500/40 bg-gold-500/10 px-3 py-2 text-xs font-semibold text-gold-300 transition-colors hover:bg-gold-500/20"
@@ -1065,6 +1061,7 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
                 }
               }}
               aiOpen={aiChatOpen && !outlineExpanded}
+              onPrevScene={onPrevScene}
               onNextScene={onNextScene}
               currentSceneTitle={lesson.scenes[activeScene]?.title}
             />

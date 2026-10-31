@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef } from "react";
 import {
@@ -36,6 +36,7 @@ interface TransportBarProps {
   onToggleHelp: () => void;
   onToggleAi?: () => void;
   aiOpen?: boolean;
+  onPrevScene?: () => void;
   onNextScene?: () => void;
   currentSceneTitle?: string;
 }
@@ -60,6 +61,8 @@ const COPY = {
     transportForward10Title: "Forward 10 seconds (L)",
     transportToEnd: "Go to end",
     transportToEndTitle: "Go to end (End)",
+    transportPrevScene: "Previous scene",
+    transportPrevSceneTitle: "Previous scene (P)",
     transportNextScene: "Next scene",
     transportNextSceneTitle: "Next scene (N)",
     transportAiTutor: "AI Tutor",
@@ -96,6 +99,8 @@ const COPY = {
     transportForward10Title: "Tua tới 10 giây (L)",
     transportToEnd: "Tới cuối",
     transportToEndTitle: "Tới cuối (End)",
+    transportPrevScene: "Cảnh trước",
+    transportPrevSceneTitle: "Quay lại cảnh trước (P)",
     transportNextScene: "Cảnh tiếp theo",
     transportNextSceneTitle: "Cảnh tiếp theo (N)",
     transportAiTutor: "Trợ giảng AI",
@@ -130,6 +135,7 @@ export function TransportBar({
   onToggleHelp,
   onToggleAi,
   aiOpen,
+  onPrevScene,
   onNextScene,
   currentSceneTitle,
 }: TransportBarProps) {
@@ -166,6 +172,18 @@ export function TransportBar({
             <Play className="h-5 w-5 translate-x-[1px]" />
           )}
         </button>
+
+        {onPrevScene && (
+          <button
+            type="button"
+            onClick={onPrevScene}
+            className="btn-icon"
+            title={t.transportPrevSceneTitle}
+            aria-label={t.transportPrevScene}
+          >
+            <SkipBack className="h-4 w-4" />
+          </button>
+        )}
 
         {onNextScene && (
           <button
@@ -309,28 +327,8 @@ export function TransportBar({
           </button>
         </div>
 
-        {/* ✨ Trợ giảng AI button */}
-        {onToggleAi && (
-          <button
-            type="button"
-            onClick={onToggleAi}
-            className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all ${
-              aiOpen
-                ? "border-gold-400/80 bg-gold-400/20 text-gold-200 shadow-sm"
-                : "border-ink-700 bg-ink-900/80 text-mist-200 hover:border-gold-500/50 hover:text-gold-300"
-            }`}
-            title={t.transportAiTutorTitle}
-            aria-pressed={aiOpen}
-          >
-            <Sparkles className="h-3.5 w-3.5 text-gold-400" />
-            <span className="hidden sm:inline">{t.transportAiTutor}</span>
-            {aiOpen ? (
-              <span className="h-1.5 w-1.5 rounded-full bg-gold-400 animate-pulse" />
-            ) : null}
-          </button>
-        )}
 
-        <button
+          <button
           type="button"
           onClick={onToggleHelp}
           className="btn-icon"
