@@ -1,0 +1,12 @@
+{
+  "entries": [
+    {
+      "provider": "stealth",
+      "model": "qwen/qwen3.8-27b",
+      "lessonId": "lesson-mvxtgjcb-igbjt4",
+      "scenes": 5,
+      "words": 276,
+      "verifiedAt": "2026-11-01T12:45:00.563Z"
+    }
+  ]
+}
