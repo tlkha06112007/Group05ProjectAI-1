@@ -28,6 +28,12 @@ data/temp_delete/
 # Han muc token do provider do day ra, tu hoc lai. May, khong phai
 # cau hinh cua bai.
 /data/token-limits.json
+/data/model-trust.json
+/data/tts-settings.json
+/data/ai-settings.json
+
+# Local generated lessons / courses
+/data/courses/
 
 # Nhung run.bat tai ve: Node.js portable, ffmpeg, Python, venv + piper.
 # Chi la thu muc may, khong phai san pham.
@@ -54,7 +60,6 @@ __pycache__/
 /exported-player.js
 /*.png
 
-# Saved lessons ship with the tool (data/courses/).
 
 # Script tạo bài thử dùng một lần, không thuộc sản phẩm.
 /tmp-make-lesson.mjs
