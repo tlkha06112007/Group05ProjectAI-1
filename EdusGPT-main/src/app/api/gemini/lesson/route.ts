@@ -105,7 +105,7 @@ const quizSchema: Record<string, unknown> = {
           isCorrect: { type: "boolean" },
           explanation: {
             type: "string",
-            description: "Lời giải thích bằng tiếng Việt hoàn chỉnh, TUYỆT ĐỐI KHÔNG dùng tiếng Trung hay chữ Hán.",
+            description: "A complete explanation written in the lesson's output language. NEVER use Chinese/Han characters.",
           },
         },
         required: ["id", "text", "isCorrect"],
@@ -592,7 +592,7 @@ Bạn nhận được bối cảnh bài học và danh sách cảnh theo đúng 
 3. Giải thích ngắn (1-2 câu) vì sao đáp án đúng hoặc sai, giọng thân thiện như đang chữa bài.
 4. Câu hỏi kiểm tra HIỂU, không hỏi vẹt số liệu hay chi tiết vụn.
 5. Trả về MỘT danh sách phẳng: câu quiz chặng trước (mỗi chặng đúng số câu được yêu cầu, liền nhau), rồi đến câu tổng kết.
-6. NGÔN NGỮ: BẮT BUỘC 100% TIẾNG VIỆT (hoặc ngôn ngữ bài giảng được yêu cầu). Câu hỏi, tất cả phương án lựa chọn và ĐẶC BIỆT LÀ LỜI GIẢI THÍCH (explanation) PHẢI VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT. TUYỆT ĐỐI CẤM dùng tiếng Trung/chữ Hán (như 正确, 错误, 因为, 答案, 解释... hay bất kỳ chữ Hán nào) trong trường explanation!
+6. NGÔN NGỮ: BẮT BUỘC theo đúng ngôn ngữ bài giảng được yêu cầu (100% tiếng Việt nếu bài giảng bằng tiếng Việt). Câu hỏi, tất cả phương án lựa chọn và ĐẶC BIỆT LÀ LỜI GIẢI THÍCH (explanation) PHẢI VIẾT ĐỒNG BỘ THEO ĐÚNG NGÔN NGỮ BÀI GIẢNG. TUYỆT ĐỐI CẤM dùng tiếng Trung/chữ Hán (như 正确, 错误, 因为, 答案, 解释... hay bất kỳ chữ Hán nào) trong trường explanation!
 7. TUYỆT ĐỐI không để ký tự Hán/Nhật/Hàn lọt vào câu chữ (ví dụ sai: "số原子" — đúng: "số nguyên tử").
 8. CÔNG THỨC TOÁN, LÝ, HÓA, BIỂU THỨC: BẮT BUỘC định dạng chuẩn LaTeX và LUÔN bao quanh bằng ký hiệu $ (inline) hoặc $$ (display) trong cả câu hỏi, các phương án lựa chọn và phần giải thích.
    - Ví dụ chuẩn: "$f(x) = x^2$", "$f'(a)$", "$\\lim_{h \\to 0} \\frac{(a+h)^2 - a^2}{h}$", "$\\sqrt{x}$", "$e^{a}$", "$x = 3$", "$\\frac{1}{4}$".
@@ -621,7 +621,7 @@ const bankSchema: Record<string, unknown> = {
                 isCorrect: { type: "boolean" },
                 explanation: {
                   type: "string",
-                  description: "Lời giải thích bằng tiếng Việt hoàn chỉnh, TUYỆT ĐỐI KHÔNG dùng tiếng Trung hay chữ Hán.",
+                  description: "A complete explanation written in the lesson's output language. NEVER use Chinese/Han characters.",
                 },
               },
               required: ["text", "isCorrect"],
@@ -762,7 +762,7 @@ mà không có slide trước thì vẫn hiểu trọn vẹn.
   + Không markdown, không LaTeX, không đọc ký hiệu vụn. TUYỆT ĐỐI không lặp lại cụm từ.
   + Nếu "duration" dài hơn 12 giây, giảng giải kỹ càng, chi tiết — đừng nói vắn tắt cho xong.
 - Nếu loại cảnh là "quiz": BẮT BUỘC trả "quiz" gồm câu hỏi kiểm tra độ hiểu sâu + đúng 4 phương án,
-  mỗi phương án có isCorrect và explanation chi tiết bằng tiếng Việt như lời thầy giải thích. BẮT BUỘC toàn bộ câu hỏi, các phương án và explanation PHẢI 100% BẰNG TIẾNG VIỆT, TUYỆT ĐỐI CẤM dùng tiếng Trung hay chữ Hán (như 正确, 错误, 因为...) trong lời giải thích! Mọi công thức toán/lý/hóa trong câu hỏi, đáp án và giải thích phải định dạng chuẩn LaTeX kẹp trong $...$ (ví dụ: "$f'(x)=2x$", "$\\frac{a}{b}$", "$\\lim_{h \\to 0}$").
+  mỗi phương án có isCorrect và explanation chi tiết bằng đúng ngôn ngữ bài giảng (100% tiếng Việt nếu bài giảng bằng tiếng Việt). BẮT BUỘC toàn bộ câu hỏi, các phương án và explanation PHẢI đồng bộ theo đúng ngôn ngữ bài giảng, TUYỆT ĐỐI CẤM dùng tiếng Trung hay chữ Hán (như 正确, 错误, 因为...) trong lời giải thích! Mọi công thức toán/lý/hóa trong câu hỏi, đáp án và giải thích phải định dạng chuẩn LaTeX kẹp trong $...$ (ví dụ: "$f'(x)=2x$", "$\\frac{a}{b}$", "$\\lim_{h \\to 0}$").
 - Nếu loại cảnh là "simulation3d": BẮT BUỘC trả "simulation3d" với "type" hợp lệ.
 
 # Cách dùng hình thức trình bày

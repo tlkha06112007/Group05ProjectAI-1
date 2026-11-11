@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "provider": "stealth",
+      "model": "qwen/qwen3.8-27b",
+      "lessonId": "lesson-mvxwifpu-h6s5ez",
+      "scenes": 17,
+      "words": 1475,
+      "verifiedAt": "2026-11-01T14:26:46.970Z"
+    },
+    {
+      "provider": "stealth",
+      "model": "openai/gpt-oss-120b",
+      "lessonId": "lesson-mvw7ym1p-74sou3",
+      "scenes": 16,
+      "words": 1382,
+      "verifiedAt": "2026-10-31T10:05:03.574Z"
+    }
+  ]
+}
