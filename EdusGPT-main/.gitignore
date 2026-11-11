@@ -54,6 +54,12 @@ __pycache__/
 /exported-player.js
 /*.png
 
+# Bài giảng được tạo khi dùng thực tế - không thuộc source code, mỗi máy khác nhau.
+data/courses/
+
+# Cache độ tin cậy model AI - tự sinh ra khi chạy, không cần commit.
+/data/model-trust.json
+
 # Saved lessons ship with the tool (data/courses/).
 
 # Script tạo bài thử dùng một lần, không thuộc sản phẩm.
