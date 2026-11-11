@@ -745,6 +745,10 @@
     flex-direction: column;
     gap: 1.1cqw;
     flex-shrink: 0;
+    /* Width must fill the card — without it flex children measure their own
+       content width and the layout collapses to a narrow column instead of
+       spanning the full slide. */
+    width: 100%;
     /*
      * Capped at the card's own content box, with the picture as the one thing in
      * here allowed to give way.
@@ -2365,6 +2369,46 @@
     margin-inline: auto;
     align-items: center;
     flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /*
+   * Standard-body: the full-width column holding text then figure in
+   * GsapSlideStage. Without width: 100% the column was sized by its own
+   * content and the text and figure could overlap or be cut off.
+   */
+  .scene-standard-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1cqw;
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /*
+   * Container for text bullets/steps inside a split or standard layout.
+   */
+  .scene-content-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1cqw;
+    width: 100%;
+    flex-shrink: 0;
+  }
+
+  /*
+   * Wrapper around the figure (image, chart, formula, quiz, etc.) inside
+   * the GSAP slide stage. `min-height: 0` lets it yield space to the words
+   * above when the card is tight; `flex: 0 1 auto` stops it from growing
+   * past what the remaining height allows.
+   */
+  .scene-figure-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    flex: 0 1 auto;
     min-height: 0;
   }
 
