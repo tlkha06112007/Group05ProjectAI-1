@@ -52,7 +52,7 @@ html[data-theme="light"] .icon-moon,html[data-theme="light"] .theme-txt-dark{dis
    web player's stylesheet uses rather than a fresh guess at "about right". */
 .stage{position:relative;aspect-ratio:16/9;container-type:inline-size;background:var(--ink2);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:var(--stage-shadow);transition:background .2s ease,border-color .2s ease}
 .scene{position:absolute;inset:0;opacity:0;visibility:hidden}
-.card{--slide-fit:1;position:absolute;inset:0;display:flex;flex-direction:column;justify-content:safe center;padding:3.4cqw 5.5cqw 9cqw;overflow:hidden;background-image:linear-gradient(180deg,var(--ink2) 0%,var(--ink2) 60%,var(--ink3) 100%)}
+.card{--slide-fit:1;position:absolute;inset:0;display:flex;flex-direction:column;justify-content:safe center;padding:3.4cqw 5.5cqw 13.5cqw;overflow:hidden;background-image:linear-gradient(180deg,var(--ink2) 0%,var(--ink2) 60%,var(--ink3) 100%)}
 .wash{position:absolute;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(120% 90% at 88% -10%,color-mix(in srgb,var(--brand) 12%,transparent) 0%,transparent 62%),radial-gradient(90% 80% at 8% 108%,color-mix(in srgb,var(--gold) 8%,transparent) 0%,transparent 60%)}
 /* Same five patterns as the web player, drawn with the export's own accent
    roles (remapped to the lesson paper in themeCss), so a downloaded deck
@@ -115,10 +115,10 @@ html[data-theme="light"] .icon-moon,html[data-theme="light"] .theme-txt-dark{dis
    the one coming next. Reserving both rows is the point — a caption whose height
    changes when the hand-over happens moves every line on screen, and the reader
    feels it as a stutter at the exact moment they are following the voice. */
-.cap{position:absolute;left:5%;right:5%;bottom:2.2cqw;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;pointer-events:none;text-align:center}
-.sent{position:relative;margin:0;font-size:1.65cqw;line-height:1.34;font-weight:600;letter-spacing:.005em;color:var(--mist);display:none;text-align:center;transition:opacity .16s linear}
-.sent[data-row="live"]{display:block;opacity:1}
-.sent[data-row="next"]{display:block;opacity:.6;color:var(--mist5);margin-top:.4cqw}
+.cap{position:absolute;left:5%;right:5%;bottom:1.62cqw;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;pointer-events:none;text-align:center;max-height:10.5cqw;overflow:hidden}
+.sent{position:relative;margin:0;font-size:1.65cqw;line-height:1.34;font-weight:600;letter-spacing:.005em;color:var(--mist);display:none;text-align:center;transition:opacity .16s linear;overflow:hidden}
+.sent[data-row="live"]{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;max-height:calc(1.34em * 2);opacity:1}
+.sent[data-row="next"]{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;max-height:calc(1.34em * 2);opacity:.6;color:var(--mist5);margin-top:.4cqw}
 .sent .w{padding:0 1px;transition:color 90ms linear}
 .sent .w[data-state="idle"]{color:var(--mist5)}
 .sent .w[data-state="said"]{color:var(--mist3)}
@@ -996,7 +996,29 @@ const PLAYER_JS = `
       if ('preservesPitch' in voice) voice.preservesPitch = true;
     } catch (e) {}
   }
-  voice.addEventListener('loadedmetadata', function () { applyVoiceRate(); });
+  // Slide seconds are not file seconds once voiceFit has scaled the clip.
+  // Writing the slide offset into currentTime starts the voice on a different
+  // word than the caption is lighting, and a scrub then sounds like the speed
+  // itself is stuttering. The same fit the rate uses is what the playhead has
+  // to use. Past the end of a short clip, hold the last audible moment: leaving
+  // the element at 0 replayed the opening sentence under the tail of the slide.
+  function placeVoice() {
+    var idx = voiceScene >= 0 ? voiceScene : sceneIndexAt(current);
+    var scene = data.scenes[idx];
+    if (!scene) return;
+    var off = Math.max(0, current - scene.start);
+    var media = off * voiceFit(idx);
+    try {
+      if (!(voice.duration > 0)) return;
+      var limit = Math.max(0, voice.duration - 0.05);
+      if (media > limit) media = limit;
+      if (Math.abs((voice.currentTime || 0) - media) > 0.05) voice.currentTime = media;
+    } catch (e) {}
+  }
+  voice.addEventListener('loadedmetadata', function () {
+    applyVoiceRate();
+    placeVoice();
+  });
 
   // --- dead air: a clip shorter than its scene used to leave the deck sitting
   // in silence until the scene's fixed duration ran out. When the clip ends
@@ -1138,13 +1160,10 @@ const PLAYER_JS = `
     // every swap: some browsers drop a custom rate when the source changes.
     // The fit on top (see voiceFit): engines speak unevenly slide to slide.
     applyVoiceRate();
+    // Even while paused: a scrub has to park the clip on the syllable the
+    // caption is about to light, or pressing play speaks the old sentence.
+    placeVoice();
     if (playing) {
-      var off = Math.max(0, current - data.scenes[idx].start);
-      try {
-        if (voice.duration && off < voice.duration && Math.abs((voice.currentTime || 0) - off) > 0.4) {
-          voice.currentTime = off;
-        }
-      } catch (e) {}
       var played = voice.play();
       if (played && played.catch) played.catch(function () {});
     } else {
@@ -1185,13 +1204,19 @@ const PLAYER_JS = `
     }
     var idx = sceneIndexAt(current);
     // The caption follows the voice, not the timeline: the per-scene fit means
-    // the clip no longer runs 1:1 with the playhead, so timeline offsets would
-    // light words the teacher has not reached yet. Same rule as the web player.
-    var off = Math.max(0, current - data.scenes[idx].start);
-    if (voiceOn && playing && voiceScene === idx && !voice.paused) {
+    // the clip no longer runs 1:1 with the playhead, so a raw timeline offset
+    // lights a different word than the one being spoken. Before the element has
+    // a clock, use the same scaled offset placeVoice will seek to, so a scrub
+    // does not flash the unscaled word and then jump.
+    var sceneOff = Math.max(0, current - data.scenes[idx].start);
+    var off = sceneOff * voiceFit(idx);
+    // Only while the clip is actually running. A seek paints before placeVoice
+    // moves the element, and the previous currentTime would light the word we
+    // just left. The scaled offset above is the word we are landing on.
+    if (voiceOn && playing && voiceScene === idx && !voice.paused && voice.readyState >= 1 && voice.duration > 0) {
       try {
         var vt = voice.currentTime;
-        if (isFinite(vt) && vt >= 0 && voice.duration > 0 && vt <= voice.duration) off = vt;
+        if (isFinite(vt) && vt >= 0 && vt <= voice.duration) off = vt;
       } catch (e) {}
     }
     paintCaption(idx, off);

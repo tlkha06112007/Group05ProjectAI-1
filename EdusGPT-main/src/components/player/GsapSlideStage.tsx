@@ -838,7 +838,7 @@ export function GsapSlideStage({
             className={`pointer-events-none absolute inset-x-0 z-20 flex justify-center px-[4%] transition-opacity duration-200 ${
               playing ? "opacity-100" : "opacity-0"
             }`}
-            style={{ bottom: "2.2cqw" }}
+            style={{ bottom: "calc(var(--slide-caption-track) * 0.12)" }}
           >
             <KaraokeSubtitle
               key={activeSceneData.id}
