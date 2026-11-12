@@ -480,6 +480,29 @@ export function paceFitRate(audioSeconds: number, slideSeconds: number, baseRate
 }
 
 /**
+ * Where to put the clip's playhead for a position on the slide.
+ *
+ * The clip does not run 1:1 with the timeline: `paceFitRate` speeds a long
+ * reading up and slows a short one down so every slide sounds like the same
+ * pace. One second of the slide is therefore `fit` seconds of audio. Seeking
+ * the element to the timeline offset lands the voice on a different word than
+ * the one the slide is on, and the caption — which follows the element's own
+ * clock — lights that wrong word. A scrub then reads as the text and the voice
+ * jumping apart, and the rate change reads as an uneven speed. Multiplying by
+ * the same fit the element is playing at is what keeps the scrub on the
+ * syllable being read.
+ */
+export function mediaTimeForOffset(
+  timelineOffset: number,
+  audioSeconds: number,
+  slideSeconds: number,
+): number {
+  const offset = Number.isFinite(timelineOffset) ? Math.max(0, timelineOffset) : 0;
+  if (!(audioSeconds > 0) || !(slideSeconds > 0)) return offset;
+  return offset * paceFitRate(audioSeconds, slideSeconds, 1);
+}
+
+/**
  * Token index of the word being spoken at `time`, or -1 before the first word.
  *
  * Binary search: called on every animation frame, and a long narration is

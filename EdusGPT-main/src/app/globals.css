@@ -774,15 +774,16 @@
    * The caption track: the strip of the slide the subtitle is given, and the
    * card's bottom padding.
    *
-   * It was 19cqw, which on a 16:9 card is about a third of the height. The
-   * subtitle itself is two rows of 1.75cqw type at a 1.32 line-height — roughly
-   * 5cqw — so the strip was four times the space the caption needed, and every
-   * slide with a table or a chart overflowed because of padding rather than
-   * because of its own content. The caption sits 12% of this strip above the
-   * bottom edge, so 9cqw leaves it clear air and gives the slide back the rest.
+   * It was 19cqw, which on a 16:9 card is about a third of the height, and
+   * every slide with a table overflowed because of padding. It was then 9cqw,
+   * which fits two single lines and nothing more: a narration sentence wraps,
+   * the caption grows upward from the bottom edge, and the wrapped lines paint
+   * over the bullets and the title. Each sentence is now clamped to two lines
+   * (see .scene-narration), and 13.5cqw is that block plus the 12% inset and
+   * a little air, so the caption stays in the strip the card already reserved.
    */
   .slide-fitted {
-    --slide-caption-track: 9cqw;
+    --slide-caption-track: 13.5cqw;
     /*
      * The fit pass steps this, not a `transform: scale()`.
      *
@@ -1692,12 +1693,21 @@
   .scene-narration {
     /* Bigger than the body copy and rounded: the caption is read as it is spoken,
        at a glance, from a seat — it is closer to a teleprompter than to a
-       footnote, and the old 1.25cqw sat below the bullet size. */
+       footnote, and the old 1.25cqw sat below the bullet size.
+       Two lines, then it stops. An unclamped sentence grows upward from the
+       bottom of the slide and covers the bullets and the title — the caption
+       track only reserves the height of this clamp. */
     font-size: 1.65cqw;
     line-height: 1.34;
     font-weight: 500;
     letter-spacing: 0.005em;
     color: var(--slide-ink);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    max-height: calc(1.34em * 2);
   }
 
   /*
@@ -1715,9 +1725,14 @@
    * depends on the text any more, so the hand-over only ever changes colour.
    */
   .scene-caption-stack {
-    /* One row of caption type: 1.65cqw of type at a 1.34 line-height. */
+    /* One row of caption type: 1.65cqw of type at a 1.34 line-height.
+       The max is two sentences of two lines each — the height the caption
+       track was sized for. Past that the block used to keep growing and
+       print through the slide above it. */
     --caption-row: 2.21cqw;
     min-height: calc(var(--caption-row) * 2 + 0.5cqw);
+    max-height: calc(var(--caption-row) * 4 + 1.6cqw);
+    overflow: hidden;
     padding-bottom: 0.3cqw;
   }
 
@@ -1730,6 +1745,12 @@
     font-weight: 500;
     letter-spacing: 0.005em;
     color: var(--slide-ink-faint);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    max-height: calc(1.34em * 2);
   }
 
   /*
