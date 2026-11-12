@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Volume2, VolumeX, LoaderCircle } from "lucide-react";
 import type { Timebase } from "@/hooks/useTimebase";
 import { sceneIndexAt, type Lesson } from "@/lib/lesson/types";
-import { approximateWords, decodeWordMarks, mediaTimeForOffset, paceFitRate, type WordMark } from "@/lib/karaoke";
+import { approximateWords, decodeWordMarks, type WordMark } from "@/lib/karaoke";
 import { useCopy, useLang } from "@/i18n/provider";
 
 const COPY = {
@@ -65,6 +65,11 @@ interface TeacherVoiceProps {
    */
   onNarration?: (update: NarrationUpdate) => void;
   onVoiceChange?: (voice: string) => void;
+  /**
+   * Called once a scene's real TTS audio length is measured so the lesson
+   * timeline can match the audio 1:1 instead of cutting off or drifting.
+   */
+  onSceneDuration?: (sceneIndex: number, audioSeconds: number) => void;
 }
 
 /** One publication on the narration channel. */
@@ -122,6 +127,39 @@ interface CachedNarration {
   url: string;
   /** Per-word timings, empty when the server sent no boundaries. */
   words: WordMark[];
+  /** Exact measured duration of the audio clip in seconds. */
+  duration: number;
+}
+
+/** Measures the real media duration of a cached audio blob URL. */
+function measureAudioDuration(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const probe = new Audio(url);
+    let settled = false;
+    const finish = (seconds: number) => {
+      if (settled) return;
+      settled = true;
+      probe.removeAttribute("src");
+      probe.load();
+      resolve(Number.isFinite(seconds) && seconds > 0 ? seconds : 0);
+    };
+    probe.addEventListener("loadedmetadata", () => finish(probe.duration), { once: true });
+    probe.addEventListener("error", () => finish(0), { once: true });
+    window.setTimeout(() => finish(0), 5000);
+  });
+}
+
+/**
+ * Returns the timeline point just before a slide begins fading into the next
+ * scene, where playback holds until the current slide's narration completes.
+ */
+function sceneSpeechHold(lesson: Lesson, sceneIndex: number): number | null {
+  const scene = lesson.scenes[sceneIndex];
+  if (!scene) return null;
+  const fade = Math.min(2, scene.duration / 2);
+  const isLast = sceneIndex >= lesson.scenes.length - 1;
+  const margin = isLast ? 0.05 : fade + 0.05;
+  return scene.start + Math.max(0.2, scene.duration - margin);
 }
 
 /**
@@ -163,6 +201,7 @@ export function TeacherVoice({
   loopEnabled = false,
   onNarration,
   onVoiceChange,
+  onSceneDuration,
 }: TeacherVoiceProps) {
   const t = useCopy(COPY);
   const currentLang = useLang();
@@ -179,41 +218,26 @@ export function TeacherVoice({
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
 
+  const lessonRef = useRef(lesson);
+  lessonRef.current = lesson;
+  const timebaseRef = useRef(timebase);
+  timebaseRef.current = timebase;
+
   const lastSpokenSceneRef = useRef<number | null>(null);
-  /**
-   * The playhead position seen on the previous frame, and the largest forward
-   * step one frame is allowed to account for.
-   *
-   * The scene index alone cannot tell a forward boundary crossing from a scrub:
-   * seeking back into the slide being read leaves the index unchanged, and
-   * seeking to a slide already read leaves both the index and "has been spoken"
-   * unchanged. Comparing positions catches both — a jump is any move the
-   * playhead could not have made on its own.
-   *
-   * The comparison has to be against the *previous frame*, not against the
-   * position the current narration was started at. Measured against the start,
-   * ordinary playback drifts past the tolerance on its own — half a second of
-   * narration reads as a seek, the reader is torn down and rebuilt, and because
-   * `stop()` nulls the channel the subtitle drops to idle and re-lights. That is
-   * a four-times-a-second restart loop that looks exactly like a flickering
-   * caption. Frame to frame, a real frame is ~16ms, so the tolerance can be
-   * generous enough to survive a stalled tab and still catch a scrub.
-   */
   const lastSeenTimeRef = useRef<number | null>(null);
+  const lastSeekSeqRef = useRef<number | null>(null);
+  const audioFinishedSceneRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  /**
-   * Speed and loudness, mirrored out of the timebase.
-   *
-   * Refs rather than state because the effect that consumes them must not
-   * re-render the narrator on every rate or volume change, and because `play`
-   * is a `useCallback` that would otherwise have to take the timebase as a
-   * dependency — a new object each render, which restarts the reader.
-   */
+  const activeAudioRef = useRef<{
+    audio: HTMLAudioElement;
+    sceneIndex: number;
+    duration: number;
+    seekApplied: boolean;
+  } | null>(null);
+
   const rateRef = useRef(timebase.rate);
   const volumeRef = useRef(timebase.volume);
   const mutedRef = useRef(timebase.muted);
-  /** Last per-scene pace correction, so a speed change keeps the fit. */
-  const fitRef = useRef(1);
   rateRef.current = timebase.rate;
   volumeRef.current = timebase.volume;
   mutedRef.current = timebase.muted;
@@ -224,17 +248,14 @@ export function TeacherVoice({
   const warmingRef = useRef(new Set<string>());
   /** rAF handle driving the subtitle highlight from the audio's own clock. */
   const trackFrameRef = useRef<number | null>(null);
-  /** Latest narration callback, so the loop reads it without re-binding. */
+  /** Latest narration & duration callbacks, so loops read them without re-binding. */
   const narrationRef = useRef(onNarration);
   narrationRef.current = onNarration;
+  const onSceneDurationRef = useRef(onSceneDuration);
+  onSceneDurationRef.current = onSceneDuration;
 
   /**
    * Pushes the audio's playback position out for the running subtitle.
-   *
-   * A rAF loop rather than the audio's `timeupdate` event: `timeupdate` fires
-   * about four times a second, which is far too coarse to light up individual
-   * words, and it is throttled further in background tabs. Reading
-   * `currentTime` every frame costs nothing and tracks the voice exactly.
    */
   const stopTracking = useCallback(() => {
     if (trackFrameRef.current !== null) {
@@ -312,9 +333,20 @@ export function TeacherVoice({
     };
   }, []);
 
+  const browserSweepRef = useRef<number | null>(null);
+
   const stop = useCallback((reportVoice?: string) => {
     abortRef.current?.abort();
     abortRef.current = null;
+    if (browserSweepRef.current !== null) {
+      window.clearInterval(browserSweepRef.current);
+      browserSweepRef.current = null;
+    }
+    const tb = timebaseRef.current;
+    tb.bufferingRef.current = false;
+    tb.speechHoldRef.current = null;
+    tb.masterClockRef.current = null;
+    activeAudioRef.current = null;
     audioRef.current?.pause();
     audioRef.current = null;
     stopTracking();
@@ -328,7 +360,7 @@ export function TeacherVoice({
     onVoiceState?.({ status: "idle", sceneIndex: null, sceneTitle: "", voice: reportVoice ?? voice });
   }, [onVoiceState, stopTracking, voice]);
 
-  /** Hands a decoded narration to the player. */
+  /** Hands a decoded narration to the player and locks it 1:1 to the timeline. */
   const play = useCallback(
     (
       entry: CachedNarration,
@@ -337,91 +369,130 @@ export function TeacherVoice({
       text: string,
       /** Seconds into the slide to begin at; 0 for ordinary forward playback. */
       startAt = 0,
-      /** Timeline end of this slide; the silence skip aims at it. */
-      sceneEnd = Number.POSITIVE_INFINITY,
-      /** Full length of this slide; the pace fit scales the clip to it. */
-      sceneDuration = Number.POSITIVE_INFINITY,
     ) => {
+      const tb = timebaseRef.current;
+      if (!tb.playing) return;
+
       const audio = new Audio(entry.url);
       audioRef.current = audio;
-      // The narration follows the timebase's speed, fitted to this slide.
-      //
-      // Without this the deck runs at `rate` while the voice runs at 1x, and the
-      // two are wrong by the time the first slide ends. That is not a subtle
-      // desync: at 2x the slides are two scenes ahead of the sentence being
-      // read, the subtitle highlight is on the wrong line, and the speed
-      // control looks like it did nothing. The timebase owns the deck's clock, so it
-      // hands the same rate to this element.
-      //
-      // The fit on top: engines do not speak every slide at the same pace, so
-      // 1x sounds uneven slide to slide. Scaling each clip to its slide keeps
-      // one speed across the deck and stops a long clip overrunning its scene.
-      const audioSeconds =
-        entry.words.length > 0 ? entry.words[entry.words.length - 1].end : 0;
-      const fitted = paceFitRate(audioSeconds, sceneDuration, rateRef.current);
-      fitRef.current = rateRef.current > 0 ? fitted / rateRef.current : 1;
-      audio.playbackRate = fitted;
+      const meta = {
+        audio,
+        sceneIndex,
+        duration: entry.duration,
+        seekApplied: startAt <= 0,
+      };
+      activeAudioRef.current = meta;
+
+      // Exact 1:1 playback speed with the timeline rate (no artificial speed warp).
+      audio.playbackRate = rateRef.current;
       if ("preservesPitch" in audio) audio.preservesPitch = true;
-      // Loudness travels with the timebase's, for the same reason: the mute
-      // button silences the deck, and the deck is mostly this audio.
       audio.volume = volumeRef.current;
       audio.muted = mutedRef.current;
-      // Without this, seeking into a slide that was already narrated would play
-      // its whole sentence from the top while the slide sits at 1:20. Seeking the
-      // element before `play()` is what lines the voice back up with the playhead.
-      //
-      // The offset is slide time. The element speaks in media time, and the two
-      // differ by exactly the fit above — a 10s point on a sped-up slide is not
-      // the 10s point of the file. Writing the slide offset straight into
-      // `currentTime` starts the voice on the wrong word, and the caption, which
-      // follows this clock, lights that word. Past the end of a short clip the
-      // old path gave up and left the element at 0, so a seek into the tail
-      // replayed the opening sentence under the last lines of the slide.
-      if (startAt > 0) {
-        const resume = () => {
-          const seconds =
-            audioSeconds > 0
-              ? audioSeconds
-              : Number.isFinite(audio.duration)
-                ? audio.duration
-                : 0;
-          const media = mediaTimeForOffset(startAt, seconds, sceneDuration);
-          if (Number.isFinite(audio.duration) && audio.duration > 0) {
-            audio.currentTime = Math.min(media, Math.max(0, audio.duration - 0.05));
-          } else {
-            audio.currentTime = media;
-          }
-        };
-        // `currentTime` before metadata is loaded is silently ignored by some
-        // browsers and throws in others, so it is applied on whichever of the
-        // two events actually arrives first.
-        if (audio.readyState >= 1) resume();
-        else audio.addEventListener("loadedmetadata", resume, { once: true });
+
+      // Arm the speech completion gate so the slide NEVER advances until the script ends.
+      tb.speechHoldRef.current = sceneSpeechHold(lessonRef.current, sceneIndex);
+      tb.bufferingRef.current = true;
+
+      // Publish word timings immediately (or generate approximate ones once duration loads).
+      if (entry.words.length > 0) {
+        narrationRef.current?.({ type: "words", sceneIndex, words: entry.words });
+      } else if (entry.duration > 0) {
+        narrationRef.current?.({
+          type: "words",
+          sceneIndex,
+          words: approximateWords(text, entry.duration),
+        });
       }
-      audio.onplay = () => {
+
+      if (entry.duration > 0) {
+        onSceneDurationRef.current?.(sceneIndex, entry.duration);
+      }
+
+      // Lock the timebase playhead to this audio element's hardware clock.
+      tb.masterClockRef.current = () => {
+        const cur = activeAudioRef.current;
+        if (!cur || cur.audio !== audio || !cur.seekApplied) return null;
+        if (audio.paused || audio.ended || audio.seeking) return null;
+        const currentScene = lessonRef.current.scenes[cur.sceneIndex];
+        if (!currentScene) return null;
+        return currentScene.start + audio.currentTime;
+      };
+
+      const applyStartSeek = () => {
+        if (activeAudioRef.current?.audio !== audio) return;
+        const clipLen =
+          Number.isFinite(audio.duration) && audio.duration > 0
+            ? audio.duration
+            : entry.duration;
+        if (clipLen > 0) {
+          meta.duration = clipLen;
+          if (entry.duration <= 0) {
+            entry.duration = clipLen;
+            onSceneDurationRef.current?.(sceneIndex, clipLen);
+            if (entry.words.length === 0) {
+              narrationRef.current?.({
+                type: "words",
+                sceneIndex,
+                words: approximateWords(text, clipLen),
+              });
+            }
+          }
+          tb.speechHoldRef.current = sceneSpeechHold(lessonRef.current, sceneIndex);
+        }
+        if (startAt > 0) {
+          const maxSeek = clipLen > 0 ? Math.max(0, clipLen - 0.05) : startAt;
+          audio.currentTime = Math.min(startAt, maxSeek);
+        }
+        meta.seekApplied = true;
+      };
+
+      if (audio.readyState >= 1) applyStartSeek();
+      else audio.addEventListener("loadedmetadata", applyStartSeek, { once: true });
+
+      const unbufferIfReady = () => {
+        if (activeAudioRef.current?.audio !== audio) return;
+        if (meta.seekApplied && !audio.paused && !audio.seeking) {
+          tb.bufferingRef.current = false;
+        }
+      };
+
+      audio.onplaying = () => {
+        if (activeAudioRef.current?.audio !== audio) return;
+        unbufferIfReady();
+        setLoading(false);
         setSpeaking(true);
         track(audio, sceneIndex);
         onVoiceState?.({ status: "speaking", sceneIndex, sceneTitle, voice });
       };
+      audio.onwaiting = () => {
+        if (activeAudioRef.current?.audio !== audio) return;
+        tb.bufferingRef.current = true;
+      };
+      audio.onseeked = () => {
+        unbufferIfReady();
+      };
       audio.onended = () => {
+        if (activeAudioRef.current?.audio !== audio) return;
+        activeAudioRef.current = null;
+        audioRef.current = null;
+        audioFinishedSceneRef.current = sceneIndex;
+        tb.masterClockRef.current = null;
+        tb.bufferingRef.current = false;
+        tb.speechHoldRef.current = null;
         setSpeaking(false);
         setLoading(false);
         stopTracking();
         onVoiceState?.({ status: "idle", sceneIndex: null, sceneTitle: "", voice });
-        // Residual silence, skipped: the clip ended but its slide still holds
-        // seconds of nothing (the engine read faster than the estimate, or an
-        // older deck was authored under the old 3-words-a-second rate). Land
-        // on the fade's doorstep rather than the boundary itself, so the
-        // two-second scene transition still plays instead of being jumped
-        // over — and mark the frames seen, so the landing does not re-speak
-        // the clip's tail. The 2.5s floor keeps the designed end-of-slide
-        // pause: only unintended silence is skipped. Not on the last slide
-        // (let it end naturally) and never while looping.
+
+        // Snap cleanly to the end of speech (the start of the outgoing 2s fade)
+        // if the scene still had residual silence left over.
         if (!loopEnabled) {
-          const tb = timebaseRef.current;
+          const latestScene = lessonRef.current.scenes[sceneIndex];
+          const sceneEnd = latestScene ? latestScene.start + latestScene.duration : Number.POSITIVE_INFINITY;
           const now = tb.timeRef.current;
           const total = tb.duration;
           if (
+            latestScene &&
             sceneEnd - now > 2.5 &&
             sceneEnd < total - 0.3 &&
             now < sceneEnd
@@ -433,36 +504,23 @@ export function TeacherVoice({
         }
       };
       audio.onerror = () => {
+        if (activeAudioRef.current?.audio !== audio) return;
+        activeAudioRef.current = null;
+        tb.masterClockRef.current = null;
+        tb.bufferingRef.current = false;
+        tb.speechHoldRef.current = null;
         setSpeaking(false);
         setLoading(false);
         stopTracking();
       };
+
       void audio.play().catch(() => {
+        if (activeAudioRef.current?.audio !== audio) return;
+        tb.bufferingRef.current = false;
+        tb.speechHoldRef.current = null;
+        tb.masterClockRef.current = null;
         setNotice(t.voiceBlocked);
       });
-      // Published even on a cache hit, so a slide that is revisited highlights
-      // without waiting on a fetch.
-      if (entry.words.length > 0) {
-        narrationRef.current?.({ type: "words", sceneIndex, words: entry.words });
-      } else {
-        // This entry has no recorded boundaries — it was cached before timings
-        // were kept, or the voice service reported none. The audio still knows
-        // its own length, so lay an even sweep over it rather than leave the
-        // line frozen. One listener, not a poll.
-        audio.addEventListener(
-          "loadedmetadata",
-          () => {
-            if (Number.isFinite(audio.duration) && audio.duration > 0) {
-              narrationRef.current?.({
-                type: "words",
-                sceneIndex,
-                words: approximateWords(text, audio.duration),
-              });
-            }
-          },
-          { once: true },
-        );
-      }
     },
     // `t` is the active dictionary object itself, so its identity only changes
     // with the language — naming it here cannot restart the reader per frame.
@@ -476,21 +534,11 @@ export function TeacherVoice({
       sceneIndex: number,
       sceneTitle: string,
       sceneSeconds: number,
-      /**
-       * How far into the slide to begin reading, in seconds.
-       *
-       * This is what makes scrubbing a narrated deck work. A jump to 1:20 in a
-       * scene whose audio has already been played would otherwise start the
-       * voice from the top of the sentence — the highlight and the sound a
-       * whole sentence ahead of the slide, which reads as the deck ignoring
-       * the seek entirely.
-       */
       startAt = 0,
-      /** Timeline end of this slide; the silence skip aims at it. */
-      sceneEnd = Number.POSITIVE_INFINITY,
       explicitVoice?: string,
     ) => {
       stop();
+      const tb = timebaseRef.current;
       const voiceToUse = explicitVoice || voiceRef.current;
       const key = `${sceneId}|${voiceToUse}`;
       const cached = cacheRef.current.get(key);
@@ -498,33 +546,37 @@ export function TeacherVoice({
       abortRef.current = controller;
 
       if (cached) {
-        play(cached, sceneIndex, sceneTitle, text, startAt, sceneEnd, sceneSeconds);
+        play(cached, sceneIndex, sceneTitle, text, startAt);
         return;
       }
 
-      // A lookahead may already be fetching this exact slide+voice (switching
-      // voices re-warms the current slide before the next frame speaks it).
-      // Riding along beats a second synthesis for one playback.
+      // Hold playback in sync while fetching/warming so video doesn't run ahead silently.
+      tb.bufferingRef.current = true;
+      tb.speechHoldRef.current = sceneSpeechHold(lessonRef.current, sceneIndex);
+
       if (warmingRef.current.has(key)) {
         setLoading(true);
         onVoiceState?.({ status: "preparing", sceneIndex, sceneTitle, voice: voiceToUse });
         const rode = await waitForWarm(key, controller.signal);
-        if (rode) {
-          play(rode, sceneIndex, sceneTitle, text, startAt, sceneEnd, sceneSeconds);
+        if (controller.signal.aborted || !timebaseRef.current.playing) {
+          timebaseRef.current.bufferingRef.current = false;
+          timebaseRef.current.speechHoldRef.current = null;
           return;
         }
-        if (controller.signal.aborted) return;
+        if (rode) {
+          const curScene = lessonRef.current.scenes[sceneIndex];
+          const freshOffset = curScene
+            ? Math.max(0, timebaseRef.current.timeRef.current - curScene.start)
+            : startAt;
+          play(rode, sceneIndex, sceneTitle, text, freshOffset <= 0.2 ? 0 : freshOffset);
+          return;
+        }
       }
 
-      // The warmers share this set: without registering, a lookahead fetch
-      // for this same slide+voice runs alongside this one and the server
-      // synthesises twice for one playback.
       warmingRef.current.add(key);
       const release = () => warmingRef.current.delete(key);
 
       setLoading(true);
-      // The gap the presenter actually cares about: the slide is on screen but
-      // its narration is still being fetched.
       onVoiceState?.({ status: "preparing", sceneIndex, sceneTitle, voice: voiceToUse });
       try {
         const response = await fetch("/api/tts", {
@@ -535,6 +587,8 @@ export function TeacherVoice({
         });
         if (controller.signal.aborted) {
           release();
+          timebaseRef.current.bufferingRef.current = false;
+          timebaseRef.current.speechHoldRef.current = null;
           return;
         }
 
@@ -543,50 +597,81 @@ export function TeacherVoice({
           throw new Error(detail?.error ?? `HTTP ${response.status}`);
         }
 
-        // Read the header before the body: `decodeWordMarks` is async, and the
-        // blob is what we actually need from it.
         const words = await decodeWordMarks(response.headers.get("x-tts-words"));
         const blob = await response.blob();
         if (controller.signal.aborted) {
           release();
+          timebaseRef.current.bufferingRef.current = false;
+          timebaseRef.current.speechHoldRef.current = null;
           return;
         }
-        const entry: CachedNarration = { url: URL.createObjectURL(blob), words };
+        const url = URL.createObjectURL(blob);
+        const wordEnd = words.length > 0 ? words[words.length - 1].end : 0;
+        const mediaDuration = await measureAudioDuration(url);
+        const duration = Math.max(wordEnd, mediaDuration);
+        if (controller.signal.aborted) {
+          URL.revokeObjectURL(url);
+          release();
+          timebaseRef.current.bufferingRef.current = false;
+          timebaseRef.current.speechHoldRef.current = null;
+          return;
+        }
+        const entry: CachedNarration = { url, words, duration };
         cacheRef.current.set(key, entry);
         release();
-        play(entry, sceneIndex, sceneTitle, text, startAt, sceneEnd, sceneSeconds);
+        if (!timebaseRef.current.playing) {
+          timebaseRef.current.bufferingRef.current = false;
+          timebaseRef.current.speechHoldRef.current = null;
+          return;
+        }
+        const curScene = lessonRef.current.scenes[sceneIndex];
+        const freshOffset = curScene
+          ? Math.max(0, timebaseRef.current.timeRef.current - curScene.start)
+          : startAt;
+        play(entry, sceneIndex, sceneTitle, text, freshOffset <= 0.2 ? 0 : freshOffset);
       } catch (error) {
         release();
         if (controller.signal.aborted) return;
         setLoading(false);
-        if (error instanceof Error && error.name === "AbortError") return;
-        // The server voice is a nicety; never let it silence the teacher.
+        timebaseRef.current.bufferingRef.current = false;
+        if (error instanceof Error && error.name === "AbortError") {
+          timebaseRef.current.speechHoldRef.current = null;
+          return;
+        }
+        // Fallback to browser synthesis while still keeping the speech-completion gate armed.
         setNotice(t.voiceServerFallback);
-        // The browser gives no timings and no duration, so the subtitle gets an
-        // even sweep across the scene's own length. Approximate, but it still
-        // moves with the reading instead of sitting frozen.
         const guess = approximateWords(text, sceneSeconds);
         narrationRef.current?.({ type: "words", sceneIndex, words: guess });
-        // Offset by where playback actually joined the slide, so the sweep does
-        // not restart at the first word either.
         const startedAt = performance.now() - startAt * 1000;
-        const sweep = window.setInterval(() => {
+        if (browserSweepRef.current !== null) window.clearInterval(browserSweepRef.current);
+        browserSweepRef.current = window.setInterval(() => {
           narrationRef.current?.({
             type: "position",
             sceneIndex,
-            time: (performance.now() - startedAt) / 1000,
+            time: ((performance.now() - startedAt) / 1000) * rateRef.current,
           });
         }, 120);
+        setSpeaking(true);
         speakWithBrowser(
           text,
           () => {
-            window.clearInterval(sweep);
+            if (browserSweepRef.current !== null) {
+              window.clearInterval(browserSweepRef.current);
+              browserSweepRef.current = null;
+            }
+            audioFinishedSceneRef.current = sceneIndex;
+            timebaseRef.current.speechHoldRef.current = null;
             setSpeaking(false);
             stopTracking();
           },
           () => {
-            window.clearInterval(sweep);
+            if (browserSweepRef.current !== null) {
+              window.clearInterval(browserSweepRef.current);
+              browserSweepRef.current = null;
+            }
+            timebaseRef.current.speechHoldRef.current = null;
             setSpeaking(false);
+            stopTracking();
           },
         );
       }
@@ -595,12 +680,8 @@ export function TeacherVoice({
   );
 
   /**
-   * Fetches one slide's narration into the cache without playing it.
-   *
-   * Shared by the prefetch below (current slide, before the first play) and
-   * the lookahead (next slides, while playing). The guards make double work
-   * impossible: a slide already cached or already being warmed is skipped, and
-   * the in-flight set is cleared even when the fetch fails.
+   * Fetches one slide's narration into the cache without playing it, and
+   * immediately syncs its word marks and duration to the timeline.
    */
   const warmScene = useCallback(
     (index: number, explicitVoice?: string) => {
@@ -608,7 +689,19 @@ export function TeacherVoice({
       if (!scene?.narration) return;
       const voiceToUse = explicitVoice || voiceRef.current;
       const key = `${scene.id}|${voiceToUse}`;
-      if (cacheRef.current.has(key) || warmingRef.current.has(key)) return;
+      const existing = cacheRef.current.get(key);
+      if (existing) {
+        if (voiceToUse === voiceRef.current) {
+          if (existing.words.length > 0) {
+            narrationRef.current?.({ type: "words", sceneIndex: index, words: existing.words });
+          }
+          if (existing.duration > 0) {
+            onSceneDurationRef.current?.(index, existing.duration);
+          }
+        }
+        return;
+      }
+      if (warmingRef.current.has(key)) return;
 
       warmingRef.current.add(key);
       fetch("/api/tts", {
@@ -618,13 +711,26 @@ export function TeacherVoice({
       })
         .then(async (response) => {
           if (response.ok) {
-            // Timings are warmed too, otherwise the next slide would come back
-            // without a highlight even though the server sent one.
             const words = await decodeWordMarks(response.headers.get("x-tts-words"));
-            cacheRef.current.set(key, {
-              url: URL.createObjectURL(await response.blob()),
-              words,
-            });
+            const url = URL.createObjectURL(await response.blob());
+            const wordEnd = words.length > 0 ? words[words.length - 1].end : 0;
+            const mediaDuration = await measureAudioDuration(url);
+            const duration = Math.max(wordEnd, mediaDuration);
+            cacheRef.current.set(key, { url, words, duration });
+            if (voiceToUse === voiceRef.current) {
+              if (words.length > 0) {
+                narrationRef.current?.({ type: "words", sceneIndex: index, words });
+              } else if (duration > 0) {
+                narrationRef.current?.({
+                  type: "words",
+                  sceneIndex: index,
+                  words: approximateWords(scene.narration ?? "", duration),
+                });
+              }
+              if (duration > 0) {
+                onSceneDurationRef.current?.(index, duration);
+              }
+            }
           }
         })
         .catch(() => {
@@ -636,17 +742,13 @@ export function TeacherVoice({
   );
 
   /**
-   * Prefetches the current slide as soon as the lesson loads.
-   *
-   * The old behaviour only warmed while playing, so the very first press of
-   * play always paid a full cold synthesis (tens of seconds) on slide 0. This
-   * moves that work to the moment the deck opens, when the student is still
-   * reading the title — by the time they press play, slide 0 is usually a
-   * cache hit.
+   * Prefetches the current and next slide as soon as the lesson loads so their
+   * durations and word timings sync before playback even begins.
    */
   useEffect(() => {
     if (!enabled) return;
     warmScene(activeSceneIndex);
+    warmScene(activeSceneIndex + 1);
   }, [activeSceneIndex, enabled, lesson.scenes, voice, warmScene]);
 
   /**
@@ -677,114 +779,153 @@ export function TeacherVoice({
   liveRef.current = { lesson, speakNow: speak };
 
   /**
-   * The timebase, read through a ref for the same reason.
+   * Synchronizes the AI teacher voice 1:1 with the single video timeline.
    *
-   * `useTimebase` returns a fresh object on every render, so naming it in a
-   * dependency array re-runs the effect on every render — and this effect, on
-   * attach, calls `stop()`, which publishes a new voice state, which re-renders,
-   * which builds a new timebase. That cycle is a "Maximum update depth exceeded"
-   * as soon as the deck is opened and never stops.
-   */
-  const timebaseRef = useRef(timebase);
-  timebaseRef.current = timebase;
-
-  /**
-   * Synchronize voice with the timeline.
-   *
-   * This follows the playhead by subscribing to it, rather than waiting for the
-   * scene index to change. That distinction is the whole fix: a scrub that lands
-   * on a slide the voice already read leaves the index *and* the "has this been
-   * spoken" flag both unchanged, so an index-driven effect sees nothing to do and
-   * that slide's audio plays on from wherever it was — which is the report that
-   * seeking did not work and the voice just runs start to finish.
-   *
-   * A restart is therefore triggered by a *discontinuity* in the playhead: a move
-   * larger than playback could have made on its own. Crossing into the next slide
-   * is such a jump and restarts that slide at its beginning, which is free because
-   * the narration is cached. Ordinary frames move by ~16ms and restart nothing.
-   *
-   * Everything the callback needs is read from refs, so this effect subscribes
-   * once. That is not an optimisation: `subscribe` fires the listener immediately
-   * on attach, and if re-subscribing were triggered by an unstable callback
-   * identity, the speak it starts would re-render, change that identity, resubscribe
-   * and start another speak — "Maximum update depth exceeded", sixty times a
-   * second, for as long as the deck was open.
+   * - Entering a slide or starting playback calls `speakNow` (holding the
+   *   clock via `bufferingRef` while TTS fetches so audio and video never drift).
+   * - Seeking within the same slide seeks `<audio>.currentTime` in place
+   *   with zero audio stutter or element recreation.
+   * - `speechHoldRef` prevents automatic transition to the next slide until the
+   *   current slide's script finishes speaking completely.
    */
   useEffect(() => {
-    if (!enabled) return;
     const tb = timebaseRef.current;
+    if (!enabled) {
+      lastSpokenSceneRef.current = null;
+      lastSeenTimeRef.current = null;
+      lastSeekSeqRef.current = null;
+      audioFinishedSceneRef.current = null;
+      return;
+    }
     if (!tb.playing) {
       stop();
       lastSpokenSceneRef.current = null;
       lastSeenTimeRef.current = null;
+      lastSeekSeqRef.current = null;
+      audioFinishedSceneRef.current = null;
       return;
     }
 
-    return tb.subscribe((time) => {
+    return tb.subscribe((time, meta) => {
       const { lesson: currentLesson, speakNow } = liveRef.current;
       const sceneIndex = sceneIndexAt(currentLesson, time);
       const scene = currentLesson.scenes[sceneIndex];
 
-      // One ordinary frame is ~16ms of deck; the timebase clamps its own delta to
-      // 250ms, and the rate multiplies that. Anything past that budget could not
-      // have happened on its own, and a backward move never could. The previous
-      // position is consumed here so the next frame is compared against this one.
-      const previous = lastSeenTimeRef.current;
       lastSeenTimeRef.current = time;
+      const userSeeked =
+        lastSeekSeqRef.current !== null && meta.seekSeq !== lastSeekSeqRef.current;
+      lastSeekSeqRef.current = meta.seekSeq;
+      const isNewScene = lastSpokenSceneRef.current !== sceneIndex;
+      const firstRun = lastSpokenSceneRef.current === null;
 
-      if (!scene?.narration) {
-        lastSpokenSceneRef.current = null;
+      if (!scene?.narration?.trim()) {
+        if (activeAudioRef.current || isNewScene) {
+          stop();
+        }
+        lastSpokenSceneRef.current = sceneIndex;
+        audioFinishedSceneRef.current = null;
+        tb.speechHoldRef.current = null;
+        tb.bufferingRef.current = false;
         return;
       }
 
-      // Where the playhead is inside this slide. Clamped at zero because a seek
-      // can land fractionally before a scene's own start, and a negative audio
-      // offset throws in some browsers.
       const offset = Math.max(0, time - scene.start);
-      const frameBudget = 0.25 * Math.max(1, rateRef.current) + 0.15;
-      const movedBackwards = previous !== null && time < previous - 0.05;
-      const jumpedForward = previous !== null && time - previous > frameBudget;
-      const isNewScene = lastSpokenSceneRef.current !== sceneIndex;
-      const jumped =
-        isNewScene ||
-        previous === null ||
-        movedBackwards ||
-        jumpedForward;
-      if (!jumped) return;
+
+      // Once narration finished on this scene, stay quiet during the outgoing 2s fade
+      // unless the user actively scrubbed back into the slide.
+      if (!userSeeked && !isNewScene && audioFinishedSceneRef.current === sceneIndex) {
+        return;
+      }
+
+      if (!firstRun && !isNewScene && !userSeeked) {
+        return;
+      }
+
+      const curAudio = activeAudioRef.current;
+      const key = `${scene.id}|${voiceRef.current}`;
+      const cached = cacheRef.current.get(key);
+
+      // Smooth in-place seek inside the same slide when audio is already loaded.
+      if (
+        userSeeked &&
+        !isNewScene &&
+        curAudio &&
+        curAudio.sceneIndex === sceneIndex &&
+        cached
+      ) {
+        const clipLen = cached.duration > 0 ? cached.duration : curAudio.duration;
+        if (clipLen > 0 && offset >= clipLen - 0.08) {
+          audioFinishedSceneRef.current = sceneIndex;
+          stop();
+          narrationRef.current?.({ type: "position", sceneIndex, time: offset });
+          return;
+        }
+        audioFinishedSceneRef.current = null;
+        tb.speechHoldRef.current = sceneSpeechHold(currentLesson, sceneIndex);
+        const maxSeek =
+          Number.isFinite(curAudio.audio.duration) && curAudio.audio.duration > 0
+            ? Math.max(0, curAudio.audio.duration - 0.05)
+            : offset;
+        curAudio.audio.currentTime = Math.min(offset, maxSeek);
+        narrationRef.current?.({ type: "position", sceneIndex, time: offset });
+        if (curAudio.audio.paused && tb.playing) {
+          void curAudio.audio.play().catch(() => setNotice(t.voiceBlocked));
+        }
+        return;
+      }
+
+      // If user scrubbed into the trailing fade zone of a scene whose audio duration
+      // is already known, don't start re-speaking the tail.
+      if (cached && cached.duration > 0 && offset >= cached.duration - 0.08) {
+        if (activeAudioRef.current) stop();
+        lastSpokenSceneRef.current = sceneIndex;
+        audioFinishedSceneRef.current = sceneIndex;
+        tb.speechHoldRef.current = null;
+        tb.bufferingRef.current = false;
+        narrationRef.current?.({ type: "position", sceneIndex, time: offset });
+        return;
+      }
 
       lastSpokenSceneRef.current = sceneIndex;
-      // When entering a new scene naturally, start at 0 so no opening syllables are clipped.
-      // Only seek into the slide when resuming from a hold/seek (>350ms into the scene).
-      const startAt = isNewScene && offset <= 0.35 ? 0 : offset;
-      void speakNow(scene.narration, scene.id, sceneIndex, scene.title, scene.duration, startAt, scene.start + scene.duration);
+      audioFinishedSceneRef.current = null;
+      const startAt =
+        offset <= 0.2 || (!firstRun && isNewScene && !userSeeked) ? 0 : offset;
+      void speakNow(
+        scene.narration,
+        scene.id,
+        sceneIndex,
+        scene.title,
+        scene.duration,
+        startAt,
+      );
     });
-    // `enabled` and `playing` are the only things that change what this does.
-    // Deliberately not `timebase`: it is a new object every render, and depending
-    // on it re-runs the effect that calls `stop()`, which re-renders — forever.
-  }, [enabled, stop, timebase.playing]);
+  }, [enabled, stop, timebase.playing, t]);
 
-  // Rate or volume changed mid-sentence: the audio element already in flight
-  // has to follow, not just the next one to be created. Depends on the two
-  // numbers rather than on the timebase object, which is new every render and
-  // would restart the reader on every frame.
+  // Rate or volume changed mid-sentence: update the active audio element 1:1.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    const target = timebase.rate * fitRef.current;
-    if (audio.playbackRate !== target) audio.playbackRate = target;
+    if (audio.playbackRate !== timebase.rate) audio.playbackRate = timebase.rate;
     if (audio.volume !== timebase.volume) audio.volume = timebase.volume;
     if (audio.muted !== timebase.muted) audio.muted = timebase.muted;
   }, [timebase.rate, timebase.volume, timebase.muted]);
 
+  // Keep speechHoldRef updated when onSceneDuration adjusts scene durations mid-flight.
+  useEffect(() => {
+    const cur = activeAudioRef.current;
+    if (cur && timebaseRef.current.playing) {
+      timebaseRef.current.speechHoldRef.current = sceneSpeechHold(lesson, cur.sceneIndex);
+    }
+  }, [lesson]);
+
   // A different lesson brings its own voice (the one picked in Studio).
-  // Follow it the same way a manual change does: drain the old run so the
-  // new lesson is narrated from its first scene instead of staying silent.
-  // Depends on the id only, so picking a voice by hand never gets clobbered.
   useEffect(() => {
     if (lesson.voice) {
       setVoice(lesson.voice);
       lastSpokenSceneRef.current = null;
       lastSeenTimeRef.current = null;
+      lastSeekSeqRef.current = null;
+      audioFinishedSceneRef.current = null;
       setNotice(null);
       stop();
     }
@@ -798,6 +939,8 @@ export function TeacherVoice({
     onVoiceChange?.(next);
     lastSpokenSceneRef.current = null;
     lastSeenTimeRef.current = null;
+    lastSeekSeqRef.current = null;
+    audioFinishedSceneRef.current = null;
     setNotice(null);
     stop(next);
 
@@ -811,7 +954,7 @@ export function TeacherVoice({
       if (scene?.narration) {
         lastSpokenSceneRef.current = activeSceneIndex;
         const offset = Math.max(0, timebase.timeRef.current - scene.start);
-        const startAt = offset <= 0.35 ? 0 : offset;
+        const startAt = offset <= 0.2 ? 0 : offset;
         void speak(
           scene.narration,
           scene.id,
@@ -819,7 +962,6 @@ export function TeacherVoice({
           scene.title,
           scene.duration,
           startAt,
-          scene.start + scene.duration,
           next,
         );
       }
@@ -830,10 +972,9 @@ export function TeacherVoice({
     if (enabled) stop();
     else {
       lastSpokenSceneRef.current = null;
-      // Same reason as in `changeVoice`: the surviving frame history would make
-      // the first frame back look like ordinary playback, and re-enabling would
-      // leave the slide silent instead of restarting the narration.
       lastSeenTimeRef.current = null;
+      lastSeekSeqRef.current = null;
+      audioFinishedSceneRef.current = null;
     }
     setEnabled(!enabled);
   };
