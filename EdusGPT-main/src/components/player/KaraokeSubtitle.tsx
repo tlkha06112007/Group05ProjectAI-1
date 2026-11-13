@@ -8,6 +8,7 @@ import {
   type AlignedSentence,
   type KaraokeTrack,
   type NarrationChannel,
+  type WordMark,
 } from "@/lib/karaoke";
 import { InlineText } from "./InlineText";
 
@@ -48,46 +49,39 @@ export function KaraokeSubtitle({
   const wordsRef = useRef<(HTMLSpanElement | null)[]>([]);
   /** Timings for the current sentence, re-derived when the voice's marks arrive. */
   const trackRef = useRef<KaraokeTrack | null>(null);
+  const sentenceEndRef = useRef<number | null>(null);
   const lastLitRef = useRef(-2);
   const frameRef = useRef<number | null>(null);
   /** Index of the sentence on screen, so a change can re-align exactly once. */
   const spokenIndexRef = useRef(0);
-  /** How many word marks the current alignment was built from. */
-  const builtForRef = useRef<string | null>(null);
+  /** Reference to the word-marks array this alignment was built from. */
+  const builtForRef = useRef<WordMark[] | undefined>(undefined);
 
   /**
-   * How many marks this scene's timings hold, as a string so a ref compare
-   * decides whether anything changed.
-   *
-   * The timings arrive with the audio, a second or more after this component
-   * first mounts, and they land on the channel rather than through React. So they
-   * are polled for, bounded: a deck of fourteen slides would otherwise leave
-   * fourteen 250ms timers running for the rest of the session whenever the voice
-   * is off, which is pure CPU for a caption that will never light up.
+   * Re-aligns whenever this scene's word marks arrive or get replaced (for
+   * example when approximate timings are upgraded to exact TTS boundaries).
    */
   const [marksVersion, setMarksVersion] = useState(0);
 
   useEffect(() => {
-    const size = () => String(channel.words.get(sceneIndex)?.length ?? 0);
-    let builtFor = size();
-    if (builtFor !== builtForRef.current) {
-      builtForRef.current = builtFor;
-      setMarksVersion((value) => value + 1);
+    const check = () => {
+      const current = channel.words.get(sceneIndex);
+      if (current !== builtForRef.current) {
+        builtForRef.current = current;
+        setMarksVersion((value) => value + 1);
+      }
+    };
+    check();
+
+    const listeners = channel.wordsListeners;
+    if (listeners) {
+      listeners.add(check);
+      return () => {
+        listeners.delete(check);
+      };
     }
 
-    let waits = 0;
-    const poll = window.setInterval(() => {
-      const current = size();
-      if (current === builtFor) {
-        if ((waits += 1) > 80) window.clearInterval(poll);
-        return;
-      }
-      builtFor = current;
-      builtForRef.current = current;
-      window.clearInterval(poll);
-      setMarksVersion((value) => value + 1);
-    }, 250);
-
+    const poll = window.setInterval(check, 250);
     return () => window.clearInterval(poll);
   }, [channel, sceneIndex]);
 
@@ -179,7 +173,11 @@ export function KaraokeSubtitle({
 
       const track = trackRef.current;
       if (track) {
-        const active = activeWordIndex(track, time);
+        const sentenceEnd = sentenceEndRef.current;
+        const active =
+          sentenceEnd !== null && time > sentenceEnd + 0.05
+            ? nodes.length
+            : activeWordIndex(track, time);
         if (active !== lastLitRef.current) {
           // Normally this advances by one, so only the word being left and the
           // word being entered can have changed: two attribute writes per word
@@ -232,9 +230,19 @@ export function KaraokeSubtitle({
   // and a mismatch would light the wrong words.
   useEffect(() => {
     const tokens = shown[0]?.tokens ?? [];
+    wordsRef.current.length = tokens.length;
     trackRef.current = tokens.some((token) => token.start !== null)
       ? buildTrack(tokens)
       : null;
+    let lastEnd: number | null = null;
+    for (let i = tokens.length - 1; i >= 0; i -= 1) {
+      const end = tokens[i].end;
+      if (end !== null) {
+        lastEnd = end;
+        break;
+      }
+    }
+    sentenceEndRef.current = lastEnd;
     lastLitRef.current = -2;
   }, [shown]);
 

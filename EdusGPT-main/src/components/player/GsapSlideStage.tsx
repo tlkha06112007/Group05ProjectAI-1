@@ -375,7 +375,7 @@ export function GsapSlideStage({
      * behaviour a presenter expects.
      */
     const first = scenes[0];
-    if (first) {
+    if (first && timebase.timeRef.current < 0.05) {
       const firstCard = first.querySelector(".scene-card");
       const firstTitle = first.querySelector(".scene-title");
       const firstSub = first.querySelector(".scene-sub");
@@ -835,9 +835,7 @@ export function GsapSlideStage({
         */}
         {activeSceneData?.narration ? (
           <div
-            className={`pointer-events-none absolute inset-x-0 z-20 flex justify-center px-[4%] transition-opacity duration-200 ${
-              playing ? "opacity-100" : "opacity-0"
-            }`}
+            className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-[4%] opacity-100 transition-opacity duration-200"
             style={{ bottom: "calc(var(--slide-caption-track) * 0.12)" }}
           >
             <KaraokeSubtitle
