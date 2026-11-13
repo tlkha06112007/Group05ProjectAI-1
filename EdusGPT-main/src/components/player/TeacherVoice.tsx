@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Volume2, VolumeX, LoaderCircle } from "lucide-react";
 import type { Timebase } from "@/hooks/useTimebase";
 import { sceneIndexAt, type Lesson } from "@/lib/lesson/types";
-import { approximateWords, decodeWordMarks, paceFitRate, type WordMark } from "@/lib/karaoke";
+import { approximateWords, decodeWordMarks, mediaTimeForOffset, paceFitRate, type WordMark } from "@/lib/karaoke";
 import { useCopy, useLang } from "@/i18n/provider";
 
 const COPY = {
@@ -369,10 +369,28 @@ export function TeacherVoice({
       // Without this, seeking into a slide that was already narrated would play
       // its whole sentence from the top while the slide sits at 1:20. Seeking the
       // element before `play()` is what lines the voice back up with the playhead.
+      //
+      // The offset is slide time. The element speaks in media time, and the two
+      // differ by exactly the fit above — a 10s point on a sped-up slide is not
+      // the 10s point of the file. Writing the slide offset straight into
+      // `currentTime` starts the voice on the wrong word, and the caption, which
+      // follows this clock, lights that word. Past the end of a short clip the
+      // old path gave up and left the element at 0, so a seek into the tail
+      // replayed the opening sentence under the last lines of the slide.
       if (startAt > 0) {
         const resume = () => {
-          if (audio.duration && startAt >= audio.duration) return;
-          audio.currentTime = startAt;
+          const seconds =
+            audioSeconds > 0
+              ? audioSeconds
+              : Number.isFinite(audio.duration)
+                ? audio.duration
+                : 0;
+          const media = mediaTimeForOffset(startAt, seconds, sceneDuration);
+          if (Number.isFinite(audio.duration) && audio.duration > 0) {
+            audio.currentTime = Math.min(media, Math.max(0, audio.duration - 0.05));
+          } else {
+            audio.currentTime = media;
+          }
         };
         // `currentTime` before metadata is loaded is silently ignored by some
         // browsers and throws in others, so it is applied on whichever of the

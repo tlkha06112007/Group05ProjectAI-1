@@ -6,7 +6,7 @@
 // asserts the fit, the clamp, and the cases it must leave alone.
 //
 // Run with: node --experimental-strip-types --no-warnings scripts/check-voice-pace.mjs
-import { paceFitRate } from "../src/lib/karaoke.ts";
+import { mediaTimeForOffset, paceFitRate } from "../src/lib/karaoke.ts";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -44,6 +44,27 @@ check("base rate multiplies", near(paceFitRate(30, 13, 1.5), 1.5 * 1.4), `got ${
 check("slow base keeps fit", near(paceFitRate(5, 13, 0.5), 0.5 * 0.8), `got ${paceFitRate(5, 13, 0.5)}`);
 
 // Degenerate inputs play at the chosen speed rather than NaN or 0.
+// A scrub must land on the same syllable the fit is playing. Slide seconds
+// are not file seconds once the clip is scaled, and seeking the file to the
+// slide offset is what pulled the caption off the voice.
+check(
+  "seek on an exact fit stays put",
+  near(mediaTimeForOffset(6, 11.5, 13), 6),
+  `got ${mediaTimeForOffset(6, 11.5, 13)}`,
+);
+check(
+  "seek on a long clip follows the speedup",
+  near(mediaTimeForOffset(6, 15.7, 13), 6 * (15.7 / 11.5)),
+  `got ${mediaTimeForOffset(6, 15.7, 13)}`,
+);
+check(
+  "seek on a short clip follows the slowdown",
+  near(mediaTimeForOffset(10, 5, 13), 8),
+  `got ${mediaTimeForOffset(10, 5, 13)}`,
+);
+check("seek with no audio is the slide offset", mediaTimeForOffset(4, 0, 13) === 4);
+check("seek before the slide stays at zero", mediaTimeForOffset(-2, 11.5, 13) === 0);
+
 check("no timings means no fit", paceFitRate(0, 13, 1) === 1);
 check("tiny slide means no fit", paceFitRate(10, 2, 1) === 1);
 check("zero slide means no fit", paceFitRate(10, 0, 1) === 1);
