@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ensureGsap } from "@/lib/gsap";
 import type { Timebase } from "@/hooks/useTimebase";
-import { sceneKindLabel, defaultSlideLayout, type Lesson, type SlideLayout } from "@/lib/lesson/types";
+import { sceneIndexAt, sceneKindLabel, defaultSlideLayout, type Lesson, type SlideLayout } from "@/lib/lesson/types";
 import { motionFor } from "@/lib/lesson/motion";
 import { quizHold } from "@/lib/lesson/quiz";
 import { mindmapFreshFrom } from "@/lib/lesson/mindmap";
@@ -18,7 +18,7 @@ import { KaraokeSubtitle } from "./KaraokeSubtitle";
 import { ScenePointer } from "./ScenePointer";
 import { pointerColorToRgb } from "@/lib/lesson/pollinations";
 import { formatClock } from "@/lib/format";
-import type { NarrationChannel } from "@/lib/karaoke";
+import { mediaTimeForOffset, type NarrationChannel } from "@/lib/karaoke";
 import { useCopy, useLang } from "@/i18n/provider";
 
 const COPY = {
@@ -375,7 +375,7 @@ export function GsapSlideStage({
      * behaviour a presenter expects.
      */
     const first = scenes[0];
-    if (first && timebase.timeRef.current < 0.05) {
+    if (first) {
       const firstCard = first.querySelector(".scene-card");
       const firstTitle = first.querySelector(".scene-title");
       const firstSub = first.querySelector(".scene-sub");
@@ -418,6 +418,18 @@ export function GsapSlideStage({
       if (timeline) {
         timeline.pause();
         timeline.time(Math.min(time, timeline.duration()));
+      }
+
+      const sceneIndex = sceneIndexAt(lesson, time);
+      const scene = lesson.scenes[sceneIndex];
+      if (scene) {
+        const offset = Math.max(0, time - scene.start);
+        if (!meta.playing) {
+          const marks = narration.words.get(sceneIndex);
+          const audioSeconds = marks && marks.length > 0 ? marks[marks.length - 1].end : 0;
+          const media = mediaTimeForOffset(offset, audioSeconds, scene.duration);
+          narration.live = { sceneIndex, time: media };
+        }
       }
 
       const total = meta.duration || lesson.duration || 1;
@@ -835,7 +847,7 @@ export function GsapSlideStage({
         */}
         {activeSceneData?.narration ? (
           <div
-            className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-[4%] opacity-100 transition-opacity duration-200"
+            className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-[4%] transition-opacity duration-200 opacity-100"
             style={{ bottom: "calc(var(--slide-caption-track) * 0.12)" }}
           >
             <KaraokeSubtitle

@@ -8,7 +8,6 @@ import {
   type AlignedSentence,
   type KaraokeTrack,
   type NarrationChannel,
-  type WordMark,
 } from "@/lib/karaoke";
 import { InlineText } from "./InlineText";
 
@@ -49,70 +48,49 @@ export function KaraokeSubtitle({
   const wordsRef = useRef<(HTMLSpanElement | null)[]>([]);
   /** Timings for the current sentence, re-derived when the voice's marks arrive. */
   const trackRef = useRef<KaraokeTrack | null>(null);
-  const sentenceEndRef = useRef<number | null>(null);
   const lastLitRef = useRef(-2);
   const frameRef = useRef<number | null>(null);
-  /** Index of the sentence on screen, so a change can re-align exactly once. */
-  const spokenIndexRef = useRef(0);
-  /** Reference to the word-marks array this alignment was built from. */
-  const builtForRef = useRef<WordMark[] | undefined>(undefined);
+  /** How many word marks the current alignment was built from. */
+  const builtForRef = useRef<string | null>(null);
 
   /**
-   * Re-aligns whenever this scene's word marks arrive or get replaced (for
-   * example when approximate timings are upgraded to exact TTS boundaries).
+   * How many marks this scene's timings hold, as a string so a ref compare
+   * decides whether anything changed.
    */
   const [marksVersion, setMarksVersion] = useState(0);
 
   useEffect(() => {
-    const check = () => {
-      const current = channel.words.get(sceneIndex);
-      if (current !== builtForRef.current) {
-        builtForRef.current = current;
-        setMarksVersion((value) => value + 1);
-      }
-    };
-    check();
-
-    const listeners = channel.wordsListeners;
-    if (listeners) {
-      listeners.add(check);
-      return () => {
-        listeners.delete(check);
-      };
+    const size = () => String(channel.words.get(sceneIndex)?.length ?? 0);
+    let builtFor = size();
+    if (builtFor !== builtForRef.current) {
+      builtForRef.current = builtFor;
+      setMarksVersion((value) => value + 1);
     }
 
-    const poll = window.setInterval(check, 250);
+    let waits = 0;
+    const poll = window.setInterval(() => {
+      const current = size();
+      if (current === builtFor) {
+        if ((waits += 1) > 80) window.clearInterval(poll);
+        return;
+      }
+      builtFor = current;
+      builtForRef.current = current;
+      window.clearInterval(poll);
+      setMarksVersion((value) => value + 1);
+    }, 250);
+
     return () => window.clearInterval(poll);
   }, [channel, sceneIndex]);
 
-  /**
-   * The caption's sentences, each carrying the words and timings it owns.
-   *
-   * Computed once per (narration, timings) rather than per frame. A caption that
-   * re-aligned every sentence sixty times a second would spend more CPU deciding
-   * which sentence to show than the rest of the player uses, and the result is
-   * the same every time.
-   *
-   * With no timings yet this still returns the sentences and their words — the
-   * highlight is simply unlit. The spans have to exist before any timing
-   * arrives, and deciding what is a span by `start !== null` would mean
-   * rendering nothing until then.
-   */
   const sentences = useMemo<AlignedSentence[]>(
     () => alignSentences(text, channel.words.get(sceneIndex) ?? []),
-    // `channel.words` is mutated in place and never triggers a render, so
-    // `marksVersion` is what stands in for the arrival of the timings.
     [text, sceneIndex, channel, marksVersion],
   );
 
   /**
-   * The sentence the voice is on: the last one whose first word has begun.
-   *
-   * A caption that advanced on a timer would drift from the voice, and drift is
-   * the one thing that makes a karaoke caption feel broken, so this is driven by
-   * the same word timings the highlight uses. A sentence the voice never measured
-   * is skipped, which leaves the caption on the last timed sentence rather than
-   * guessing ahead.
+   * The sentence covering the current timeline/audio offset.
+   * Matches YouTube-style subtitle intervals so seeking anywhere immediately shows the right text.
    */
   const sentenceAt = (time: number): number => {
     if (sentences.length <= 1) return 0;
@@ -126,20 +104,32 @@ export function KaraokeSubtitle({
     return chosen === -1 ? 0 : chosen;
   };
 
+  /** Index of the sentence on screen, initialized to wherever playhead currently sits. */
+  const initialTime =
+    channel.live && channel.live.sceneIndex === sceneIndex ? channel.live.time : 0;
+  const spokenIndexRef = useRef(sentenceAt(initialTime));
+
   /**
    * Which sentences are on screen, and a counter to re-render them.
-   *
-   * A state bump rather than a live ref because the words are React nodes: they
-   * have to be re-rendered for the caption to change sentence. The counter is
-   * what `shown` is memoised on, because the index itself lives in a ref that
-   * React cannot see change to.
    */
   const [shownVersion, setShownVersion] = useState(0);
+
+  // Sync sentence when scene or sentences change
+  useEffect(() => {
+    const time = channel.live && channel.live.sceneIndex === sceneIndex ? channel.live.time : null;
+    if (time !== null) {
+      const targetSentence = sentenceAt(time);
+      if (spokenIndexRef.current !== targetSentence) {
+        spokenIndexRef.current = targetSentence;
+        setShownVersion((v) => v + 1);
+      }
+    }
+  }, [sentences, sceneIndex, channel.live]);
+
   const shown = useMemo(() => {
-    const index = spokenIndexRef.current;
+    const index = Math.min(Math.max(0, spokenIndexRef.current), Math.max(0, sentences.length - 1));
     return [sentences[index] ?? null, sentences[index + 1] ?? null] as const;
   }, [sentences, shownVersion]);
-
 
   useEffect(() => {
     const paint = () => {
@@ -148,42 +138,23 @@ export function KaraokeSubtitle({
       const time = live && live.sceneIndex === sceneIndex ? live.time : null;
 
       if (time === null) {
-        // Parked or muted: leave the sentence the voice stopped on, unlit, so a
-        // paused slide stays readable. A sweep across words the voice never
-        // measured would drift, and drift is worse than no highlight.
-        if (lastLitRef.current !== -1) {
-          for (const node of nodes) if (node) node.dataset.state = "idle";
-          lastLitRef.current = -1;
-        }
         frameRef.current = requestAnimationFrame(paint);
         return;
       }
 
-      // Where the caption is. This is the only thing that re-renders, and it
-      // changes a handful of times across a slide rather than once per frame.
+      // Where the caption is. This changes when crossing sentence boundary or seeking.
       const sentence = sentenceAt(time);
       if (sentence !== spokenIndexRef.current) {
         spokenIndexRef.current = sentence;
         setShownVersion((value) => value + 1);
-        // The words on screen are now different words, so the highlight restarts
-        // from nothing instead of continuing the previous sentence's index.
         lastLitRef.current = -2;
         for (const node of nodes) if (node) node.dataset.state = "idle";
       }
 
       const track = trackRef.current;
       if (track) {
-        const sentenceEnd = sentenceEndRef.current;
-        const active =
-          sentenceEnd !== null && time > sentenceEnd + 0.05
-            ? nodes.length
-            : activeWordIndex(track, time);
+        const active = activeWordIndex(track, time);
         if (active !== lastLitRef.current) {
-          // Normally this advances by one, so only the word being left and the
-          // word being entered can have changed: two attribute writes per word
-          // boundary instead of one per word in the sentence. The whole-range
-          // re-stamp is kept for the case that actually needs it — a seek, where
-          // the jump can be from the middle of the sentence to the start.
           const jumped = Math.abs(active - lastLitRef.current) > 1;
           if (jumped) {
             for (let i = 0; i < nodes.length; i += 1) {
@@ -192,10 +163,6 @@ export function KaraokeSubtitle({
               node.dataset.state = i < active ? "said" : i === active ? "now" : "idle";
             }
           } else {
-            // The word being left keeps whichever state its new position
-            // implies: stepping back one word turns the old "now" back into
-            // "idle", stepping forward turns it into "said". Getting this
-            // backwards leaves a permanently accent-coloured word behind.
             const previous = lastLitRef.current;
             const leaving = previous >= 0 ? nodes[previous] : null;
             if (leaving) {
@@ -214,13 +181,6 @@ export function KaraokeSubtitle({
     return () => {
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     };
-    // `sentences` is load-bearing and must be named here. The loop above closes
-    // over `sentenceAt`, which reads the sentence starts; without this the loop
-    // kept the list from the render that first mounted the caption — the one
-    // taken before any timings had arrived, where every start is null — so
-    // `sentenceAt` could only ever answer 0. The highlight still moved, because
-    // it is built from a different effect, which is exactly why the caption
-    // appeared stuck on its first sentence while the words lit up correctly.
   }, [channel, sceneIndex, sentences]);
 
   // The word track for whichever sentence is on screen, built from the tokens
@@ -230,19 +190,9 @@ export function KaraokeSubtitle({
   // and a mismatch would light the wrong words.
   useEffect(() => {
     const tokens = shown[0]?.tokens ?? [];
-    wordsRef.current.length = tokens.length;
     trackRef.current = tokens.some((token) => token.start !== null)
       ? buildTrack(tokens)
       : null;
-    let lastEnd: number | null = null;
-    for (let i = tokens.length - 1; i >= 0; i -= 1) {
-      const end = tokens[i].end;
-      if (end !== null) {
-        lastEnd = end;
-        break;
-      }
-    }
-    sentenceEndRef.current = lastEnd;
     lastLitRef.current = -2;
   }, [shown]);
 

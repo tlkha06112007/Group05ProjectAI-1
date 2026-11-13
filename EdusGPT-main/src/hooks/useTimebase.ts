@@ -13,8 +13,6 @@ export interface TimeMeta {
   playing: boolean;
   duration: number;
   rate: number;
-  /** Incremented whenever the playhead is explicitly seeked or looped. */
-  seekSeq: number;
 }
 
 export type TimeListener = (time: number, meta: TimeMeta) => void;
@@ -73,22 +71,13 @@ export function useTimebase({
    */
   const holdRef = useRef<number | null>(null);
   /**
-   * Soft narration gate: clamps time progression at this position while
-   * keeping `playing === true` so a slide never advances until its script/audio
-   * has finished speaking.
-   */
-  const speechHoldRef = useRef<number | null>(null);
-  /**
-   * True while the narrator is fetching/buffering audio for the current slide,
-   * pausing playhead advancement so video and audio start in lockstep.
+   * True while audio speech is being synthesized or fetched, holding the timeline
+   * so slides and audio never desync.
    */
   const bufferingRef = useRef(false);
-  /**
-   * Optional master audio clock returning the exact lesson time (in seconds)
-   * from the active <audio> element so video, audio, and subtitles stay 1:1.
-   */
-  const masterClockRef = useRef<(() => number | null) | null>(null);
-  const seekSeqRef = useRef(0);
+  const setBuffering = useCallback((isBuffering: boolean) => {
+    bufferingRef.current = isBuffering;
+  }, []);
 
   durationRef.current = duration;
   playingRef.current = playing;
@@ -101,7 +90,6 @@ export function useTimebase({
       playing: playingRef.current,
       duration: durationRef.current,
       rate: rateRef.current,
-      seekSeq: seekSeqRef.current,
     };
     for (const listener of listenersRef.current) listener(timeRef.current, meta);
   }, []);
@@ -112,7 +100,6 @@ export function useTimebase({
       playing: playingRef.current,
       duration: durationRef.current,
       rate: rateRef.current,
-      seekSeq: seekSeqRef.current,
     });
     return () => {
       listenersRef.current.delete(listener);
@@ -123,7 +110,6 @@ export function useTimebase({
     (time: number) => {
       const next = clampTime(time, durationRef.current || Number.MAX_SAFE_INTEGER);
       timeRef.current = next;
-      seekSeqRef.current += 1;
       notify();
     },
     [notify],
@@ -143,10 +129,7 @@ export function useTimebase({
 
   const play = useCallback(() => {
     if (durationRef.current <= 0) return;
-    if (timeRef.current >= durationRef.current - 0.05) {
-      timeRef.current = 0;
-      seekSeqRef.current += 1;
-    }
+    if (timeRef.current >= durationRef.current - 0.05) timeRef.current = 0;
     setPlaying(true);
   }, []);
 
@@ -195,23 +178,13 @@ export function useTimebase({
       const delta = Math.min((now - last) / 1000, 0.25);
       last = now;
 
+      // While buffering/loading speech, pause playhead advancement so timeline doesn't desync
       if (bufferingRef.current) {
         frame = requestAnimationFrame(tick);
         return;
       }
 
-      const externalTime = masterClockRef.current?.();
-      let time =
-        externalTime !== null && externalTime !== undefined && Number.isFinite(externalTime)
-          ? externalTime
-          : timeRef.current + delta * rateRef.current;
-
-      // Soft speech gate: hold right before the slide transition until the
-      // current slide's script/narration finishes speaking.
-      const speechHold = speechHoldRef.current;
-      if (speechHold !== null && time >= speechHold) {
-        time = speechHold;
-      }
+      let time = timeRef.current + delta * rateRef.current;
 
       // A gate: stop at the hold rather than crossing it. Playback ends here
       // instead of freezing mid-frame, so the transport reads paused and the
@@ -232,7 +205,6 @@ export function useTimebase({
       if (durationRef.current > 0 && time >= durationRef.current) {
         if (looping) {
           time = bounds!.a;
-          seekSeqRef.current += 1;
         } else {
           timeRef.current = durationRef.current;
           setPlaying(false);
@@ -241,10 +213,7 @@ export function useTimebase({
         }
       } else if (looping) {
         const crossed = previous < bounds!.b && time >= bounds!.b;
-        if (crossed || time > bounds!.b + 0.35) {
-          time = bounds!.a;
-          seekSeqRef.current += 1;
-        }
+        if (crossed || time > bounds!.b + 0.35) time = bounds!.a;
       }
 
       previous = time;
@@ -263,12 +232,8 @@ export function useTimebase({
     playing,
     /** Set a number to stop the deck there; `null` to let it run. */
     holdRef,
-    /** Soft gate holding playback at the end of a slide until narration ends. */
-    speechHoldRef,
-    /** True while TTS audio is preparing/buffering for the current slide. */
     bufferingRef,
-    /** Hardware audio clock callback so video, audio, and subtitles stay 1:1. */
-    masterClockRef,
+    setBuffering,
     rate,
     volume,
     muted,

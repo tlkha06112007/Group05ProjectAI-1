@@ -19,7 +19,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useTimebase, type LoopRange } from "@/hooks/useTimebase";
-import { chapterIndexAt, relayoutLesson, sceneIndexAt, type Lesson } from "@/lib/lesson/types";
+import { chapterIndexAt, sceneIndexAt, type Lesson } from "@/lib/lesson/types";
 import { LESSONS_CHANGED_EVENT, loadStoredLessons, setActiveLessonId } from "@/lib/lesson/storage";
 import { recordLessonProgress } from "@/lib/student/profile";
 import { normalizeVietnameseSearch, slugify } from "@/lib/format";
@@ -32,7 +32,7 @@ import { ShortcutsDialog } from "./ShortcutsDialog";
 import { FlashcardModal } from "./FlashcardModal";
 import { QuizModal } from "./QuizModal";
 import { TeacherVoice, type VoiceState } from "./TeacherVoice";
-import { approximateWords, createNarrationChannel, setChannelWords } from "@/lib/karaoke";
+import { createNarrationChannel } from "@/lib/karaoke";
 import { ClassroomAgentChat } from "./ClassroomAgentChat";
 import { useCopy } from "@/i18n/provider";
 
@@ -137,7 +137,6 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
   const [voiceState, setVoiceState] = useState<VoiceState>({
     status: "idle", sceneIndex: null, sceneTitle: "", voice: "",
   });
-  const voiceSpeakingRef = useRef(false);
   const [activeChapter, setActiveChapter] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [aiChatOpen, setAiChatOpen] = useState(true);
@@ -337,8 +336,6 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
       tbPause();
       tbSeek(0);
       clearLoop();
-      narration.words.clear();
-      narration.live = null;
 
       const next = library.find((item) => item.id === selectedId);
       if (next) {
@@ -357,7 +354,7 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
         }
       } catch {}
     },
-    [clearLoop, lesson.id, library, narration, tbPause, tbSeek],
+    [clearLoop, lesson.id, library, tbPause, tbSeek],
   );
 
   const onPrevScene = useCallback(() => {
@@ -372,42 +369,10 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
     }
   }, [activeScene, lesson.scenes, tbSeek]);
 
-  const playheadRef = timebase.timeRef;
-  const handleSceneDuration = useCallback(
-    (sceneIndex: number, audioSeconds: number) => {
-      if (!(audioSeconds > 0)) return;
-      const targetDuration = Math.round(Math.max(3.5, audioSeconds + 2) * 1000) / 1000;
-      setLesson((prev) => {
-        const existing = prev.scenes[sceneIndex];
-        if (!existing) return prev;
-        if (Math.abs(existing.duration - targetDuration) < 0.2) return prev;
-
-        const curTime = playheadRef.current;
-        const curSceneIdx = sceneIndexAt(prev, curTime);
-        const oldCurScene = prev.scenes[curSceneIdx];
-        const curOffset = oldCurScene ? curTime - oldCurScene.start : 0;
-
-        const updatedScenes = prev.scenes.map((s, idx) =>
-          idx === sceneIndex ? { ...s, duration: targetDuration } : s,
-        );
-        const relaid = relayoutLesson({ ...prev, scenes: updatedScenes });
-
-        if (curSceneIdx > sceneIndex && oldCurScene) {
-          const newCurScene = relaid.scenes[curSceneIdx];
-          if (newCurScene) {
-            const adjusted = newCurScene.start + Math.max(0, curOffset);
-            queueMicrotask(() => {
-              tbSeek(adjusted);
-            });
-          }
-        }
-        return relaid;
-      });
-    },
-    [playheadRef, tbSeek],
-  );
-
   // --- cheap React state: only changes when the scene actually changes -----
+  // `subscribe` is a stable callback; the `timebase` object itself is fresh on
+  // every render, so depending on it re-attached this subscription (and its
+  // synchronous setState) on every render — the "Maximum update depth" loop.
   const subscribeTime = timebase.subscribe;
   useEffect(() => {
     let lastPercent = 0;
@@ -416,29 +381,6 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
       const chapter = chapterIndexAt(lesson, time);
       setActiveScene((current) => (current === scene ? current : scene));
       setActiveChapter((current) => (current === chapter ? current : chapter));
-
-      // Keep subtitles synced 1:1 with the timeline even when paused, scrubbing,
-      // voice-off, or rolling through the 2-second fade after audio finishes.
-      const currentScene = lesson.scenes[scene];
-      if (currentScene?.narration) {
-        const offset = Math.max(0, time - currentScene.start);
-        if (!narration.words.has(scene)) {
-          const speakWindow = Math.max(
-            1,
-            currentScene.duration - Math.min(2, currentScene.duration / 2),
-          );
-          setChannelWords(
-            narration,
-            scene,
-            approximateWords(currentScene.narration, speakWindow),
-          );
-        }
-        if (!voiceSpeakingRef.current || !meta.playing) {
-          narration.live = { sceneIndex: scene, time: offset };
-        }
-      } else if (!voiceSpeakingRef.current) {
-        narration.live = null;
-      }
 
       // Record student lesson progress for LMS tracking
       if (lesson.duration > 0 && lesson.id) {
@@ -449,10 +391,12 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
         }
       }
     });
-  }, [subscribeTime, lesson, narration]);
+  }, [subscribeTime, lesson]);
 
   // --- A→B loop helpers ----------------------------------------------------
-  // `playheadRef` is declared above so duration updates and loop helpers share it.
+  // `timeRef` is the same ref object for the life of the hook, so this stays
+  // stable while `timebase` itself is rebuilt every render.
+  const playheadRef = timebase.timeRef;
   const setLoopPoint = useCallback(
     (point: "a" | "b") => {
       const time = Number(playheadRef.current.toFixed(3));
@@ -919,7 +863,6 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
                   activeSceneIndex={activeScene}
                   loopEnabled={loop.enabled}
                   onVoiceState={setVoiceState}
-                  onSceneDuration={handleSceneDuration}
                   onVoiceChange={(nextVoice) => {
                     setLesson((prev) => {
                       const updated = { ...prev, voice: nextVoice };
@@ -937,18 +880,9 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
                     // Written straight onto the channel; see the note where it is
                     // declared for why this is never state.
                     if (update.type === "position") {
-                      voiceSpeakingRef.current = true;
                       narration.live = { sceneIndex: update.sceneIndex, time: update.time };
                     } else if (update.type === "words") {
-                      setChannelWords(narration, update.sceneIndex, update.words);
-                    } else {
-                      voiceSpeakingRef.current = false;
-                      const curTime = playheadRef.current;
-                      const curSceneIdx = sceneIndexAt(lesson, curTime);
-                      const curScene = lesson.scenes[curSceneIdx];
-                      narration.live = curScene?.narration
-                        ? { sceneIndex: curSceneIdx, time: Math.max(0, curTime - curScene.start) }
-                        : null;
+                      narration.words.set(update.sceneIndex, update.words);
                     }
                   }}
                 />

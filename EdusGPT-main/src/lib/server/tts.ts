@@ -303,15 +303,29 @@ async function synthesizeOnce(
   pieces: string[],
   voice: LessonVoiceId,
 ): Promise<Synthesis> {
-  if (!shared) shared = await openConnection();
+  const ws = (shared?.tts as unknown as { _ws?: { readyState?: number } })?._ws;
+  if (!shared || (ws && ws.readyState !== 1)) {
+    if (shared) await closeConnection(shared);
+    shared = await openConnection();
+  }
   const { name, prosody } = resolveVoice(voice);
   const speechRate = await readSpeechRate();
-  const rateOffset = Math.round((speechRate - 1) * 100);
-  const rateStr = `${rateOffset >= 0 ? "+" : ""}${rateOffset}%`;
-  const effectiveProsody = {
-    ...prosody,
-    rate: prosody?.rate ?? (speechRate !== 1.0 ? rateStr : undefined),
-  };
+
+  const cleanProsody: Record<string, string> = {};
+  if (prosody?.rate === "slow") {
+    cleanProsody.rate = "-15%";
+  } else if (Math.abs(speechRate - 1.0) >= 0.01) {
+    const rateOffset = Math.round((speechRate - 1) * 100);
+    cleanProsody.rate = `${rateOffset >= 0 ? "+" : ""}${rateOffset}%`;
+  }
+
+  if (prosody?.pitch === "high") {
+    cleanProsody.pitch = "+10Hz";
+  } else if (prosody?.pitch === "low") {
+    cleanProsody.pitch = "-10Hz";
+  }
+
+  const effectiveProsody = Object.keys(cleanProsody).length > 0 ? cleanProsody : undefined;
 
   const buffers: Uint8Array[] = [];
   const words: WordMark[] = [];
@@ -332,6 +346,15 @@ async function synthesizeOnce(
   });
 
   for (const piece of pieces) {
+    const pieceWs = (shared.tts as unknown as { _ws?: { readyState?: number } })?._ws;
+    if (pieceWs && pieceWs.readyState !== 1) {
+      await closeConnection(shared);
+      shared = await openConnection();
+      await shared.tts.setMetadata(name, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3, {
+        wordBoundaryEnabled: true,
+      });
+    }
+
     const dir = await mkdtemp(join(shared.dir, "chunk-"));
     try {
       // Work around a bug in msedge-tts: when a chunk comes back with no
