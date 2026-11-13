@@ -594,7 +594,7 @@ export function chapterIndexAt(lesson: Lesson, time: number): number {
 export function relayoutLesson(lesson: Lesson): Lesson {
   let cursor = 0;
   const scenes = lesson.scenes.map((scene) => {
-    const duration = Math.min(90, Math.max(2.5, Number(scene.duration) || 6));
+    const duration = Math.min(300, Math.max(2.5, Number(scene.duration) || 6));
     const next = { ...scene, start: Math.round(cursor * 1000) / 1000, duration };
     cursor += duration;
     return next;

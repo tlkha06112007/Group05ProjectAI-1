@@ -437,11 +437,26 @@ export interface NarrationChannel {
   live: NarrationProgress | null;
   /** sceneIndex -> word timings. Filled as each slide's audio is fetched. */
   words: Map<number, WordMark[]>;
+  /** Incremented whenever a scene's timings are inserted or replaced. */
+  wordsVersion?: number;
+  /** Optional listeners notified immediately when `words` updates. */
+  wordsListeners?: Set<() => void>;
 }
 
 /** Convenience for building the channel in a component. */
 export function createNarrationChannel(): NarrationChannel {
-  return { live: null, words: new Map() };
+  return { live: null, words: new Map(), wordsVersion: 0, wordsListeners: new Set() };
+}
+
+/** Writes per-scene word timings onto the channel and notifies subtitle listeners. */
+export function setChannelWords(
+  channel: NarrationChannel,
+  sceneIndex: number,
+  words: WordMark[],
+): void {
+  channel.words.set(sceneIndex, words);
+  channel.wordsVersion = (channel.wordsVersion ?? 0) + 1;
+  channel.wordsListeners?.forEach((listener) => listener());
 }
 
 /**
