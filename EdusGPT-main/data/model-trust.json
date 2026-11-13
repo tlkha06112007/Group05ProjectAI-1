@@ -2,6 +2,14 @@
   "entries": [
     {
       "provider": "stealth",
+      "model": "openai/gpt-oss-120b",
+      "lessonId": "lesson-mwf46buu-on789q",
+      "scenes": 5,
+      "words": 301,
+      "verifiedAt": "2026-11-13T15:15:06.433Z"
+    },
+    {
+      "provider": "stealth",
       "model": "qwen/qwen3.8-27b",
       "lessonId": "lesson-mvxtgjcb-igbjt4",
       "scenes": 5,

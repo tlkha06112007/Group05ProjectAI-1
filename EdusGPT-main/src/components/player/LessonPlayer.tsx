@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -883,8 +883,6 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
                       narration.live = { sceneIndex: update.sceneIndex, time: update.time };
                     } else if (update.type === "words") {
                       narration.words.set(update.sceneIndex, update.words);
-                    } else {
-                      narration.live = null;
                     }
                   }}
                 />

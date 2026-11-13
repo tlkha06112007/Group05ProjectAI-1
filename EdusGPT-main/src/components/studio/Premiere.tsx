@@ -318,6 +318,9 @@ export function PremierePlayer({
             cancelAnimationFrame(frameRef.current);
             frameRef.current = null;
           }
+          if (audioRef.current) {
+            channelRef.current.live = { sceneIndex: index, time: audioRef.current.currentTime };
+          }
         };
 
         audio.onended = () => {
@@ -681,9 +684,7 @@ export function PremierePlayer({
               channel={channelRef.current}
               playing={phase.name === "playing"}
               caption={
-                // Karaoke needs a playhead: with the sound off there is
-                // nothing to highlight against, so the slide sits plain.
-                phase.name === "playing" && current.narration.trim() ? (
+                current.narration.trim() ? (
                   <KaraokeSubtitle
                     key={`ai-${current.index + 1}`}
                     text={current.narration}

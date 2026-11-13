@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clampTime } from "@/lib/lesson/types";
@@ -70,6 +70,14 @@ export function useTimebase({
    * reads.
    */
   const holdRef = useRef<number | null>(null);
+  /**
+   * True while audio speech is being synthesized or fetched, holding the timeline
+   * so slides and audio never desync.
+   */
+  const bufferingRef = useRef(false);
+  const setBuffering = useCallback((isBuffering: boolean) => {
+    bufferingRef.current = isBuffering;
+  }, []);
 
   durationRef.current = duration;
   playingRef.current = playing;
@@ -170,6 +178,12 @@ export function useTimebase({
       const delta = Math.min((now - last) / 1000, 0.25);
       last = now;
 
+      // While buffering/loading speech, pause playhead advancement so timeline doesn't desync
+      if (bufferingRef.current) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+
       let time = timeRef.current + delta * rateRef.current;
 
       // A gate: stop at the hold rather than crossing it. Playback ends here
@@ -218,6 +232,8 @@ export function useTimebase({
     playing,
     /** Set a number to stop the deck there; `null` to let it run. */
     holdRef,
+    bufferingRef,
+    setBuffering,
     rate,
     volume,
     muted,

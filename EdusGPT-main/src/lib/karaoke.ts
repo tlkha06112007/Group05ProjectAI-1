@@ -122,18 +122,82 @@ export function isMathPiece(piece: string): boolean {
  * text — a stale header, a different voice — and the plain sentence is returned
  * instead. A wrong highlight is worse than no highlight.
  */
-export function alignNarration(text: string, marks: WordMark[]): KaraokeToken[] {
+/**
+ * Fills untimed token gaps by interpolating between neighboring timed boundaries.
+ * Ensures every word has an active window, preventing subtitle freezes.
+ */
+export function fillTokenGaps(tokens: KaraokeToken[], totalDuration?: number): KaraokeToken[] {
+  let maxEnd = 0;
+  for (const t of tokens) {
+    if (t.end !== null && t.end > maxEnd) maxEnd = t.end;
+  }
+  const total = totalDuration && totalDuration > maxEnd ? totalDuration : Math.max(maxEnd, 1);
+
+  let i = 0;
+  while (i < tokens.length) {
+    const isWord = !/^\s+$/.test(tokens[i].text) && !PUNCTUATION.test(tokens[i].text) && fold(tokens[i].text).length > 0;
+    if (tokens[i].start !== null || !isWord) {
+      i++;
+      continue;
+    }
+
+    let j = i;
+    while (j < tokens.length && tokens[j].start === null) {
+      j++;
+    }
+
+    let prevEnd = 0;
+    for (let k = i - 1; k >= 0; k--) {
+      if (tokens[k].end !== null) {
+        prevEnd = tokens[k].end!;
+        break;
+      }
+    }
+
+    let nextStart = total;
+    for (let k = j; k < tokens.length; k++) {
+      if (tokens[k].start !== null) {
+        nextStart = tokens[k].start!;
+        break;
+      }
+    }
+
+    if (nextStart <= prevEnd) {
+      nextStart = prevEnd + (j - i) * 0.3;
+    }
+
+    const span = (nextStart - prevEnd) / Math.max(1, j - i);
+    let cur = prevEnd;
+    for (let k = i; k < j; k++) {
+      const isW = !/^\s+$/.test(tokens[k].text) && !PUNCTUATION.test(tokens[k].text);
+      if (isW) {
+        tokens[k].start = cur;
+        tokens[k].end = cur + span;
+        cur += span;
+      }
+    }
+
+    i = j;
+  }
+
+  return tokens;
+}
+
+/**
+ * Lines the subtitle's words up with the service's word boundaries.
+ *
+ * If boundaries are missing or partial, any unaligned words are interpolated
+ * rather than discarded, ensuring subtitles never get stuck or reset to the start.
+ */
+export function alignNarration(text: string, marks: WordMark[], totalDuration?: number): KaraokeToken[] {
   const pieces = splitMathAwarePieces(text);
   const plain = (): KaraokeToken[] =>
     pieces.map((piece) => ({ text: piece, start: null, end: null }));
-  if (marks.length === 0) return plain();
+  if (!marks || marks.length === 0) return plain();
 
   const tokens: KaraokeToken[] = [];
   let cursor = 0;
-  let lit = 0;
-  /** How many of the service's boundaries ended up inside a word's window. */
   let consumed = 0;
-  /** Every word-like piece of the text, whether or not a boundary was found. */
   let expected = 0;
 
   for (let i = 0; i < pieces.length; i += 1) {
@@ -145,18 +209,13 @@ export function alignNarration(text: string, marks: WordMark[]): KaraokeToken[] 
 
     const isMath = isMathPiece(piece);
     const target = fold(piece);
-    // A token with no letters or digits left — "=", "→", "?" — has nothing to
-    // speak, so it must not claim a boundary. Testing the folded text rather
-    // than matching a punctuation list is what keeps that list from needing to
-    // grow: any new symbol reduces to an empty string and is skipped by the
-    // same rule.
     if (target.length === 0) {
       tokens.push({ text: piece, start: null, end: null });
       continue;
     }
     expected += 1;
 
-    // Lookahead for next speakable word target to avoid math eating into following words
+    // Lookahead for next speakable word target
     let nextTarget = "";
     for (let j = i + 1; j < pieces.length; j += 1) {
       if (/^\s+$/.test(pieces[j]) || PUNCTUATION.test(pieces[j])) continue;
@@ -168,9 +227,6 @@ export function alignNarration(text: string, marks: WordMark[]): KaraokeToken[] 
     let read = "";
     let last = first;
 
-    // Take the next boundary. Keep taking while what has been read is still a
-    // prefix of this token — that is how "9", "x", "1" end up lighting the
-    // single slide token "9 × 1".
     while (cursor < marks.length) {
       const mark = marks[cursor];
       if (PUNCTUATION.test(mark.text)) {
@@ -192,33 +248,21 @@ export function alignNarration(text: string, marks: WordMark[]): KaraokeToken[] 
       continue;
     }
     tokens.push({ text: piece, start: marks[first].start, end: marks[last].end });
-    lit += 1;
     consumed += last - first + 1;
   }
 
-  // Coverage is measured in both directions, because a header can be wrong in
-  // two ways and only one of them is caught by counting marks.
-  //
-  // Punctuation is counted out of the mark side: the service reports it as
-  // boundaries of its own, so a sentence with one comma per five words arrives
-  // with far more marks than it has words, and comparing the two directly
-  // rejected perfectly good timings and threw the highlight away.
-  //
-  // The text side catches the opposite failure — a mark list that is simply
-  // shorter than the text it claims to describe, such as a stale header from
-  // another lesson. Counting marks alone passes that, because the alignment
-  // claims every mark it was given and then runs out; the reader is left
-  // watching the highlight stop part-way through and sit still while the voice
-  // carries on, which is worse than no highlight at all.
   const speakable = marks.reduce(
     (total, mark) => total + (PUNCTUATION.test(mark.text) ? 0 : 1),
     0,
   );
   const words = tokens.filter((token) => token.start !== null).length;
-  if (lit === 0 || speakable === 0) return plain();
-  const coveredMarks = consumed * 10 >= speakable * 9;
-  const coveredText = words * 10 >= expected * 9;
-  return coveredMarks && coveredText ? tokens : plain();
+  if (words === 0 || speakable === 0) return plain();
+  const coveredMarks = consumed * 10 >= speakable * 7;
+  const coveredText = words * 10 >= expected * 7;
+  if (!coveredMarks || !coveredText) return plain();
+
+  const durationHint = totalDuration ?? marks[marks.length - 1]?.end;
+  return fillTokenGaps(tokens, durationHint);
 }
 
 /** One caption line: a sentence, the words in it, and when the voice starts it. */
@@ -227,64 +271,63 @@ export interface AlignedSentence {
   text: string;
   /**
    * This sentence's own tokens, carrying their share of the timings.
-   *
-   * Timings are relative to the start of the whole scene's audio, exactly as
-   * `alignNarration` returns them, so they can be looked up against the
-   * playback position without rebasing.
    */
   tokens: KaraokeToken[];
-  /** Seconds from the start of the audio; null when the voice never measured it. */
+  /** Seconds from the start of the audio, or null if no timings exist yet. */
   start: number | null;
+  /** Seconds from the start of the audio when this sentence ends, or null. */
+  end: number | null;
 }
 
 /**
  * Lines a whole narration up with the voice's boundaries, then cuts the result
  * into the sentences the caption shows one at a time.
  *
- * The alignment has to happen over the *whole* narration and only then be cut
- * up. Aligning a single sentence on its own is what broke the caption in two
- * separate ways at once: the boundaries describe the entire recording, so
- * starting a sentence at the first mark of the scene put every sentence's
- * timings at the top of the audio, and the coverage check — which asks whether
- * the alignment claimed the boundaries it was given — then compared one
- * sentence's handful of words against the scene's full mark list, failed, and
- * discarded the timings entirely. The result was a caption that never lit a
- * word and never moved past its first sentence.
- *
- * Cutting is done by walking the token list alongside the sentences rather than
- * by re-aligning each one, so the caption and the highlight cannot disagree
- * about where a sentence begins: they are the same numbers.
+ * Guarantees every sentence has valid, monotonic start and end timestamps so
+ * seeking anywhere on the timeline always maps immediately to the right subtitle.
  */
-export function alignSentences(text: string, marks: WordMark[]): AlignedSentence[] {
+export function alignSentences(
+  text: string,
+  marks: WordMark[],
+  fallbackDuration?: number,
+): AlignedSentence[] {
   const clean = text.replace(/\s+/g, " ").trim();
   const sentences = splitSentences(clean);
   if (sentences.length === 0) return [];
 
-  const tokens = alignNarration(clean, marks);
+  const tokens = alignNarration(clean, marks, fallbackDuration);
   const out: AlignedSentence[] = [];
   let index = 0;
 
-  for (const sentence of sentences) {
-    // The token list is `clean` split on whitespace, so the running total of the
-    // token texts is an exact character offset into `clean`: a sentence ends
-    // exactly where its own length says it does.
+  for (let sIdx = 0; sIdx < sentences.length; sIdx++) {
+    const sentence = sentences[sIdx];
     const slice: KaraokeToken[] = [];
     let filled = 0;
     while (index < tokens.length && filled < sentence.length) {
       const token = tokens[index];
-      // The space that separated this sentence from the last one is counted
-      // here but not kept: the sentence carries its own trimmed text, and
-      // handing its caption a leading space would indent every line but the
-      // first.
       if (slice.length > 0 || token.text.trim().length > 0) slice.push(token);
       filled += token.text.length;
       index += 1;
     }
+
+    const start = slice.find((token) => token.start !== null)?.start ?? null;
+    const end = [...slice].reverse().find((token) => token.end !== null)?.end ?? null;
+
     out.push({
       text: sentence,
       tokens: slice,
-      start: slice.find((token) => token.start !== null)?.start ?? null,
+      start,
+      end,
     });
+  }
+
+  // Ensure monotonic contiguous intervals when timings are present
+  for (let i = 0; i < out.length - 1; i++) {
+    if (out[i].end !== null && out[i + 1].start !== null && out[i].end! > out[i + 1].start!) {
+      const mid = (out[i].end! + out[i + 1].start!) / 2;
+      out[i].end = mid;
+      out[i + 1].start = mid;
+    }
   }
 
   return out;
@@ -471,8 +514,22 @@ export function buildTrack(tokens: KaraokeToken[]): KaraokeTrack {
  * new pace. Without it those lessons would run their last sentence into the
  * next slide.
  */
+/**
+ * Per-scene playback correction so every slide sounds like the same speed.
+ *
+ * Local engines do not speak at a uniform pace: the same VieNeu voice reads
+ * one 50-word slide in 11.2s and the next in 15.7s, so a fixed playbackRate of
+ * 1x sounds like 1x on one slide and ~1.4x on another. Scaling this clip to
+ * the time its slide actually allows removes that variance and also stops a
+ * long clip being cut off at the scene boundary.
+ *
+ * The ceiling is 1.4, not 1.3, and the reason is arithmetic rather than taste:
+ * teaching pace stretches every engine's audio by 1/0.75 = 1.33, so a deck
+ * generated before that stretch needs that much room just to speak at its own
+ * new pace. Without it those lessons would run their last sentence into the
+ * next slide.
+ */
 export function paceFitRate(audioSeconds: number, slideSeconds: number, baseRate = 1): number {
-  // ponytail: fixed 1.5s end-pause + clamp 0.8-1.4; per-engine measured fit if variance grows
   if (!(audioSeconds > 0) || !(slideSeconds > 0) || !(baseRate > 0)) return baseRate;
   const avail = slideSeconds - 1.5;
   if (!(avail > 1)) return baseRate;
