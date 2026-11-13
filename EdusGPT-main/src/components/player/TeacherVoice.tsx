@@ -173,6 +173,7 @@ function sceneSpeechHold(lesson: Lesson, sceneIndex: number): number | null {
  */
 function speakWithBrowser(
   text: string,
+  language: string | undefined,
   onDone: () => void,
   onError: () => void,
 ): void {
@@ -182,12 +183,14 @@ function speakWithBrowser(
   }
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "vi-VN";
+  const isEn = language === "en";
+  utterance.lang = isEn ? "en-US" : "vi-VN";
   utterance.rate = 1.05;
-  const vi = window.speechSynthesis
+  const prefix = isEn ? "en" : "vi";
+  const matched = window.speechSynthesis
     .getVoices()
-    .find((v) => v.lang.toLowerCase().startsWith("vi"));
-  if (vi) utterance.voice = vi;
+    .find((v) => v.lang.toLowerCase().startsWith(prefix));
+  if (matched) utterance.voice = matched;
   utterance.onend = onDone;
   utterance.onerror = onError;
   window.speechSynthesis.speak(utterance);
@@ -654,6 +657,7 @@ export function TeacherVoice({
         setSpeaking(true);
         speakWithBrowser(
           text,
+          lessonRef.current.language,
           () => {
             if (browserSweepRef.current !== null) {
               window.clearInterval(browserSweepRef.current);
