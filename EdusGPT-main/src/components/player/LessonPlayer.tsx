@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   BookOpen,
   CircleCheck,
@@ -32,6 +33,7 @@ import { ShortcutsDialog } from "./ShortcutsDialog";
 import { FlashcardModal } from "./FlashcardModal";
 import { QuizModal } from "./QuizModal";
 import { TeacherVoice, type VoiceState } from "./TeacherVoice";
+import { LessonLoadingModal } from "./LessonLoadingModal";
 import { createNarrationChannel } from "@/lib/karaoke";
 import { ClassroomAgentChat } from "./ClassroomAgentChat";
 import { useCopy } from "@/i18n/provider";
@@ -123,8 +125,10 @@ interface LessonPlayerProps {
 }
 
 export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlayerProps) {
+  const router = useRouter();
   const t = useCopy(COPY);
   const [lesson, setLesson] = useState<Lesson>(initialLesson);
+  const [loadingModalOpen, setLoadingModalOpen] = useState(true);
   const [stored, setStored] = useState<Lesson[]>([]);
   const [loop, setLoop] = useState<LoopRange>({ enabled: false, a: 0, b: 0 });
   const [helpOpen, setHelpOpen] = useState(false);
@@ -148,6 +152,11 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
       setActiveLessonId(lesson.id);
     }
   }, [lesson?.id]);
+
+  useEffect(() => {
+    setLesson(initialLesson);
+    setLoadingModalOpen(true);
+  }, [initialLesson]);
   /**
    * Whether the stage owns the whole screen.
    *
@@ -336,6 +345,7 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
       tbPause();
       tbSeek(0);
       clearLoop();
+      setLoadingModalOpen(true);
 
       const next = library.find((item) => item.id === selectedId);
       if (next) {
@@ -417,6 +427,7 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
   // --- keyboard: every way to jump around the lecture ----------------------
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (loadingModalOpen) return;
       const target = event.target as HTMLElement | null;
       if (
         target &&
@@ -516,7 +527,7 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [tbSeek, tbSeekBy, tbToggle, tbStepFrames, tbSetRate, tbToggleMute, tbDuration, tbRate, setLoopPoint]);
+  }, [tbSeek, tbSeekBy, tbToggle, tbStepFrames, tbSetRate, tbToggleMute, tbDuration, tbRate, setLoopPoint, loadingModalOpen]);
 
   // --- JSON export (the lesson content, for backups and imports) ------------
   const exportLesson = useCallback(async () => {
@@ -710,7 +721,18 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
       {/* Responsive layout: Side-by-side on desktop with matching heights, stacked on mobile/tablet */}
       <div className="grid min-w-0 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_auto] lg:grid-rows-[minmax(0,1fr)] lg:gap-4 xl:gap-5">
         {/* Left column: Video stage, toolbar, transport controls */}
-        <div className="flex min-w-0 flex-col space-y-2 lg:min-h-0 lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto">
+        <div className="relative flex min-w-0 flex-col space-y-2 lg:min-h-0 lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto">
+          {/* Loading Popup Overlay: Blocks interaction with player until assets & voice are loaded */}
+          <LessonLoadingModal
+            lesson={lesson}
+            narration={narration}
+            isOpen={loadingModalOpen}
+            onFinish={() => setLoadingModalOpen(false)}
+            onCancel={() => {
+              tbPause();
+              router.push("/library");
+            }}
+          />
           {/* toolbar */}
           <div className="panel relative z-30 flex flex-wrap items-center justify-between gap-2.5 p-2.5">
             {/* Left controls: search, subject chip, teacher voice */}
