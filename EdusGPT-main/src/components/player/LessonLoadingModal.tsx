@@ -5,7 +5,7 @@ import { ArrowLeft, CheckCircle2, LoaderCircle } from "lucide-react";
 import { SceneLoader3D } from "@/components/three/SceneLoader3D";
 import { decodeWordMarks, setChannelWords, type NarrationChannel } from "@/lib/karaoke";
 import type { Lesson } from "@/lib/lesson/types";
-import { useCopy } from "@/i18n/provider";
+import { fill, useCopy } from "@/i18n/provider";
 
 const COPY = {
   en: {
@@ -13,6 +13,7 @@ const COPY = {
     connecting: "Connecting to lesson library…",
     preparingSlides: "Preparing interactive slides & models…",
     loadingVoice: "Loading AI voice & karaoke subtitles…",
+    loadingSceneVoice: "Loading voice for slide {current}/{total}…",
     ready: "Ready to learn!",
     cancelButton: "Cancel & back to library",
     progressLabel: "Loading progress",
@@ -22,6 +23,7 @@ const COPY = {
     connecting: "Đang nạp dữ liệu bài giảng…",
     preparingSlides: "Đang chuẩn bị slide và mô phỏng…",
     loadingVoice: "Đang tải giọng đọc AI và phụ đề karaoke…",
+    loadingSceneVoice: "Đang tải giọng đọc slide {current}/{total}…",
     ready: "Sẵn sàng học!",
     cancelButton: "Hủy & quay lại thư viện",
     progressLabel: "Tiến trình nạp",
@@ -68,36 +70,61 @@ export function LessonLoadingModal({
     const loadAssets = async () => {
       try {
         // Step 1: Connecting & preparing slides
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 200));
         if (controller.signal.aborted) return;
-        setProgress(35);
+        setProgress(20);
         setStatusMessage(t.preparingSlides);
 
-        // Step 2: Prewarm Scene 0 voice and wordmarks
+        // Step 2: Prewarm ALL scenes with narration
         const currentLesson = lessonRef.current;
-        const scene0 = currentLesson.scenes[0];
-        if (scene0?.narration?.trim()) {
-          setProgress(55);
-          setStatusMessage(t.loadingVoice);
+        const scenesWithNarration = currentLesson.scenes
+          .map((scene, index) => ({ scene, index }))
+          .filter((item) => Boolean(item.scene.narration?.trim()));
 
+        const totalScenes = scenesWithNarration.length;
+
+        if (totalScenes > 0) {
           const voice = currentLesson.voice || "vi-VN-HoaiMyNeural";
-          try {
-            const response = await fetch("/api/tts", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ text: scene0.narration, voice }),
-              signal: controller.signal,
-            });
 
-            if (response.ok && !controller.signal.aborted) {
-              const wordsHeader = response.headers.get("x-tts-words");
-              const words = await decodeWordMarks(wordsHeader);
-              if (words.length > 0) {
-                setChannelWords(narrationRef.current, 0, words);
+          for (let i = 0; i < totalScenes; i++) {
+            if (controller.signal.aborted) return;
+
+            const { scene, index } = scenesWithNarration[i];
+            const currentPct = Math.round(20 + (i / totalScenes) * 75);
+            setProgress(currentPct);
+            setStatusMessage(
+              fill(t.loadingSceneVoice, { current: i + 1, total: totalScenes }),
+            );
+
+            // Per-scene timeout controller (max 7s per slide to prevent stalling)
+            const sceneController = new AbortController();
+            const sceneTimeout = setTimeout(() => sceneController.abort(), 7000);
+            const onParentAbort = () => sceneController.abort();
+            controller.signal.addEventListener("abort", onParentAbort);
+
+            try {
+              const response = await fetch("/api/tts", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ text: scene.narration, voice }),
+                signal: sceneController.signal,
+              });
+
+              clearTimeout(sceneTimeout);
+              controller.signal.removeEventListener("abort", onParentAbort);
+
+              if (response.ok && !controller.signal.aborted) {
+                const wordsHeader = response.headers.get("x-tts-words");
+                const words = await decodeWordMarks(wordsHeader);
+                if (words.length > 0) {
+                  setChannelWords(narrationRef.current, index, words);
+                }
               }
+            } catch {
+              clearTimeout(sceneTimeout);
+              controller.signal.removeEventListener("abort", onParentAbort);
+              // Per-scene error or timeout: continue to next scene gracefully
             }
-          } catch {
-            // If TTS fetch fails or is aborted, fallback gracefully
           }
         }
 
