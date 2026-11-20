@@ -2,19 +2,19 @@
   "entries": [
     {
       "provider": "stealth",
+      "model": "qwen/qwen3.8-27b",
+      "lessonId": "lesson-mwoz858h-hhzeal",
+      "scenes": 17,
+      "words": 1417,
+      "verifiedAt": "2026-11-20T13:06:02.245Z"
+    },
+    {
+      "provider": "stealth",
       "model": "openai/gpt-oss-120b",
       "lessonId": "lesson-mwox7kfq-8z3029",
       "scenes": 5,
       "words": 335,
       "verifiedAt": "2026-11-20T12:00:20.871Z"
-    },
-    {
-      "provider": "stealth",
-      "model": "qwen/qwen3.8-27b",
-      "lessonId": "lesson-mwow7ikw-oe5axf",
-      "scenes": 5,
-      "words": 355,
-      "verifiedAt": "2026-11-20T11:30:06.631Z"
     }
   ]
 }
