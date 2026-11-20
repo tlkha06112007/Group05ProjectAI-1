@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CircleCheck, Circle, LoaderCircle } from "lucide-react";
+import { CircleCheck, Circle, LoaderCircle, CircleX } from "lucide-react";
 import type {
   DataPoint,
   Lesson,
@@ -19,6 +19,7 @@ import { DEFAULT_LANG, LANG_KEY, useCopy, useLang, type Lang } from "@/i18n/prov
 const COPY = {
   en: {
     preparing: "Preparing…",
+    cancelBtn: "Cancel",
     phaseOutline: "1. Outline (fast)",
     phaseScenes: "2. Write out each scene",
     sceneWord: "Scene",
@@ -41,6 +42,7 @@ const COPY = {
   },
   vi: {
     preparing: "Đang chuẩn bị…",
+    cancelBtn: "Hủy",
     phaseOutline: "1. Lên dàn ý (nhanh)",
     phaseScenes: "2. Viết chi tiết từng cảnh",
     sceneWord: "Cảnh",
@@ -602,26 +604,44 @@ export function useGenerationStream() {
 }
 
 /** Checklist rendered under the form while a lesson is being generated. */
-export function GenerationTimeline({ progress }: { progress: GenerationProgress }) {
+export function GenerationTimeline({
+  progress,
+  onCancel,
+}: {
+  progress: GenerationProgress;
+  onCancel?: () => void;
+}) {
   const t = useCopy(COPY);
   const busy = !progress.done && progress.message !== "";
 
   return (
     <div className="mt-4 space-y-3 rounded-xl border border-brand-700/50 bg-brand-500/[0.07] p-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="flex items-center gap-2 text-sm font-semibold text-brand-100">
+        <p className="flex min-w-0 items-center gap-2 text-sm font-semibold text-brand-100">
           {progress.done ? (
-            <CircleCheck className="h-4 w-4 text-brand-300" />
+            <CircleCheck className="h-4 w-4 shrink-0 text-brand-300" />
           ) : busy ? (
-            <LoaderCircle className="h-4 w-4 animate-spin text-brand-300" />
+            <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-brand-300" />
           ) : (
-            <Circle className="h-4 w-4 text-mist-500" />
+            <Circle className="h-4 w-4 shrink-0 text-mist-500" />
           )}
-          {progress.message || t.preparing}
+          <span className="truncate">{progress.message || t.preparing}</span>
         </p>
-        <span className="font-mono text-xs tabular-nums text-brand-200">
-          {Math.round(progress.percent)}%
-        </span>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="font-mono text-xs tabular-nums text-brand-200">
+            {Math.round(progress.percent)}%
+          </span>
+          {busy && onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ember-500/40 bg-ember-500/10 px-2.5 py-1 text-xs font-semibold text-ember-300 hover:bg-ember-500/20 hover:text-ember-200 transition-colors cursor-pointer"
+            >
+              <CircleX className="h-3.5 w-3.5 text-ember-400" />
+              {t.cancelBtn}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-800">

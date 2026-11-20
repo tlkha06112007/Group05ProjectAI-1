@@ -32,6 +32,7 @@ import {
   MousePointerClick,
   Presentation,
   Check,
+  CircleX,
   Search,
   Globe,
   HelpCircle,
@@ -111,10 +112,12 @@ const COPY = {
     contextReading: "Reading…",
     contextChars: "characters",
     creating: "Writing…",
+    cancelCreation: "Cancel creation",
     createHint: "Press Enter to generate. The outline appears first, then each scene.",
     draftBefore: "The draft is being saved in the",
     draftLibrary: "Library",
     draftAfter: "— where you can still see it being created.",
+    noticeCancelled: "Lesson generation cancelled.",
     noticeLocal: "Could not save to the server. The lesson still opens in this session.",
     noticeSaved: "Saved to the on-device library (data/courses).",
     noticeSaveFailed: "Could not save to the server. The lesson is still in this browser.",
@@ -272,10 +275,12 @@ const COPY = {
     contextReading: "Đang đọc…",
     contextChars: "ký tự",
     creating: "Đang viết…",
+    cancelCreation: "Hủy tạo bài",
     createHint: "Enter để tạo nhanh. Dàn ý hiện trước, rồi viết từng cảnh.",
     draftBefore: "Bài đang được lưu nháp trong",
     draftLibrary: "Thư viện",
     draftAfter: "— qua đó vẫn thấy trạng thái đang tạo.",
+    noticeCancelled: "Đã hủy tạo bài giảng.",
     noticeLocal: "Chưa lưu được lên máy chủ. Bài vẫn mở được trong phiên này.",
     noticeSaved: "Đã lưu vào thư viện trên máy (data/courses).",
     noticeSaveFailed: "Không lưu được lên máy chủ. Bài vẫn nằm trong trình duyệt.",
@@ -900,6 +905,17 @@ export function StudioPanel() {
     });
   }, [language, lessonLength, minutes, motion, notes, pattern, pointerColor, quizSettings, referenceText, sceneCount, showPointer, stream, styleId, theme, topic, useImages, voice]);
 
+  const cancel = useCallback(() => {
+    const runId = stream.progress.lessonId;
+    stream.reset();
+    setError(null);
+    setLesson(null);
+    setNotice(t.noticeCancelled);
+    if (runId) {
+      void fetch(`/api/courses?id=${encodeURIComponent(runId)}`, { method: "DELETE" }).catch(() => {});
+    }
+  }, [stream, t]);
+
   /** Saves to the server library (survives a browser wipe) and mirrors to local. */
   const save = useCallback(async () => {
     if (!lesson) return;
@@ -1502,11 +1518,21 @@ export function StudioPanel() {
             )}
             {busy ? t.creating : t.createLesson}
           </button>
+          {busy ? (
+            <button
+              type="button"
+              onClick={cancel}
+              className="inline-flex select-none items-center justify-center gap-2 rounded-xl border border-ember-500/40 bg-ember-500/10 hover:bg-ember-500/20 text-ember-300 hover:text-ember-200 font-semibold px-5 py-3 text-sm transition-all duration-150 active:scale-95 cursor-pointer shadow-sm"
+            >
+              <CircleX className="h-4 w-4 text-ember-400" />
+              {t.cancelCreation}
+            </button>
+          ) : null}
           <span className="text-sm font-medium text-mist-400">{t.createHint}</span>
         </div>
 
         {busy || stream.progress.steps.length > 0 || streamError ? (
-          <GenerationTimeline progress={stream.progress} />
+          <GenerationTimeline progress={stream.progress} onCancel={cancel} />
         ) : null}
         {busy ? (
           <p className="mt-3 text-xs text-mist-400">

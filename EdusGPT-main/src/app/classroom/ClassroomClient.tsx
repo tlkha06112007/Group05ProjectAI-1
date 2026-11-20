@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   CircleCheck,
+  CircleX,
   Globe,
   LoaderCircle,
   Play,
@@ -75,6 +77,7 @@ const COPY = {
     loadingAiWorking: "AI AGENTS AT WORK...",
     loadingVoicePrep: "Preparing voice-over: {voice}...",
     creatingBadge: "Creating...",
+    classroomCancelCreation: "Cancel creation",
   },
   vi: {
     classroomMissingSession: "Thiếu buổi học",
@@ -117,6 +120,7 @@ const COPY = {
     loadingAiWorking: "CÁC TÁC NHÂN AI ĐANG LÀM VIỆC...",
     loadingVoicePrep: "Đang chuẩn bị giọng đọc: {voice}...",
     creatingBadge: "Đang tạo...",
+    classroomCancelCreation: "Hủy tạo bài",
   },
 } satisfies Record<string, Record<string, string>>;
 
@@ -155,7 +159,16 @@ export default function ClassroomClient({
   initialVoice?: string | null;
 }) {
   const t = useCopy(COPY);
-  const { progress, running } = useGenerationStream();
+  const router = useRouter();
+  const { progress, running, reset } = useGenerationStream();
+  const cancel = useCallback(() => {
+    const runId = sessionId || progress.lessonId;
+    reset();
+    if (runId) {
+      void fetch(`/api/courses?id=${encodeURIComponent(runId)}`, { method: "DELETE" }).catch(() => {});
+    }
+    router.push("/studio");
+  }, [progress.lessonId, reset, router, sessionId]);
   const [voice, setVoice] = useState(
     initialVoice ||
       (typeof window !== "undefined"
@@ -457,13 +470,23 @@ export default function ClassroomClient({
 
     return (
       <div className="flex min-h-screen flex-col bg-ink-950 text-mist-50">
-        <header className="flex items-center gap-3 border-b border-ink-700/60 px-4 py-3 sm:px-6 lg:px-8">
+        <header className="flex items-center justify-between border-b border-ink-700/60 px-4 py-3 sm:px-6 lg:px-8">
           <Link
             href="/"
             className="flex shrink-0 items-center gap-1.5 text-sm text-mist-400 hover:text-mist-50 transition-colors"
           >
             <ArrowLeft className="h-4 w-4" /> {t.classroomBackHome}
           </Link>
+          {mine && running ? (
+            <button
+              type="button"
+              onClick={cancel}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-ember-500/40 bg-ember-500/10 px-3 py-1.5 text-xs font-semibold text-ember-300 hover:bg-ember-500/20 hover:text-ember-200 transition-colors cursor-pointer"
+            >
+              <CircleX className="h-3.5 w-3.5 text-ember-400" />
+              {t.classroomCancelCreation}
+            </button>
+          ) : null}
         </header>
         <main className="flex flex-1 items-center justify-center p-4">
           <GenerationLoadingHero
@@ -473,6 +496,7 @@ export default function ClassroomClient({
             percent={mine ? progress.percent : draftPercent}
             voice={voice}
             t={t}
+            onCancel={mine && running ? cancel : undefined}
           />
         </main>
       </div>
@@ -504,6 +528,16 @@ export default function ClassroomClient({
             </span>
           )}
         </p>
+        {mine && running ? (
+          <button
+            type="button"
+            onClick={cancel}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-ember-500/40 bg-ember-500/10 px-3 py-1.5 text-xs font-semibold text-ember-300 hover:bg-ember-500/20 hover:text-ember-200 transition-colors cursor-pointer"
+          >
+            <CircleX className="h-3.5 w-3.5 text-ember-400" />
+            {t.classroomCancelCreation}
+          </button>
+        ) : null}
       </header>
 
       <div className="flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:px-8">
@@ -782,6 +816,7 @@ function GenerationLoadingHero({
   percent,
   voice,
   t,
+  onCancel,
 }: {
   title: string;
   subtitle: string;
@@ -789,6 +824,7 @@ function GenerationLoadingHero({
   percent: number;
   voice: string;
   t: Record<string, string>;
+  onCancel?: () => void;
 }) {
   const clamped = Math.max(5, Math.min(100, Math.round(percent)));
   const voiceName = voice.includes(":")
@@ -854,6 +890,17 @@ function GenerationLoadingHero({
           <p className="mt-3 text-center font-mono text-[11px] text-brand-300/80">
             🎙️ {t.loadingVoicePrep.replace("{voice}", voiceName)}
           </p>
+        ) : null}
+
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="mt-4 flex w-full select-none items-center justify-center gap-2 rounded-xl border border-ember-500/40 bg-ember-500/10 hover:bg-ember-500/20 text-ember-300 hover:text-ember-200 font-semibold py-2.5 px-4 text-xs transition-colors cursor-pointer"
+          >
+            <CircleX className="h-4 w-4 text-ember-400" />
+            {t.classroomCancelCreation}
+          </button>
         ) : null}
       </div>
 
