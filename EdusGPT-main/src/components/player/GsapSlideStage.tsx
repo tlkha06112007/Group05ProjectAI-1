@@ -646,16 +646,14 @@ export function GsapSlideStage({
             hasContent &&
             (requested === "image-left" ||
               requested === "image-right" ||
-              ((requested === "cards" || requested === "statement" || requested === "two-col") &&
-                hasPicture &&
-                scene.bullets.length >= 2) ||
+              requested === "cards" ||
+              requested === "statement" ||
+              requested === "two-col" ||
               requested === "compare" ||
               requested === "flow" ||
               requested === "spotlight" ||
               requested === "quote" ||
-              (requested === "full-figure" && scene.bullets.length > 2)) &&
-            hasFigure &&
-            scene.kind !== "quiz";
+              (requested === "full-figure" && scene.bullets.length > 2));
 
           const layout: SlideLayout = shouldSplit
             ? requested === "image-left"
@@ -664,7 +662,7 @@ export function GsapSlideStage({
             : requested === "full-figure"
             ? "full-figure"
             : requested;
-          const isSplit = (layout === "image-left" || layout === "image-right") && scene.kind !== "quiz";
+          const isSplit = shouldSplit;
 
           const text = (
             <div className="scene-content-text w-full space-y-3">

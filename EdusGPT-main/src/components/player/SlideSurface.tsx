@@ -163,16 +163,14 @@ export function SlideSurface({
     hasContent &&
     (requested === "image-left" ||
       requested === "image-right" ||
-      ((requested === "cards" || requested === "statement" || requested === "two-col") &&
-        hasPicture &&
-        scene.bullets.length >= 2) ||
+      requested === "cards" ||
+      requested === "statement" ||
+      requested === "two-col" ||
       requested === "compare" ||
       requested === "flow" ||
       requested === "spotlight" ||
       requested === "quote" ||
-      (requested === "full-figure" && scene.bullets.length > 2)) &&
-    hasFigure &&
-    scene.kind !== "quiz";
+      (requested === "full-figure" && scene.bullets.length > 2));
 
   const layout: SlideLayout = shouldSplit
     ? requested === "image-left"
@@ -181,7 +179,7 @@ export function SlideSurface({
     : requested === "full-figure"
     ? "full-figure"
     : requested;
-  const split = (layout === "image-left" || layout === "image-right") && scene.kind !== "quiz";
+  const split = shouldSplit;
 
   /**
    * Free layout: when the scene brings its own geometry, that geometry is the
