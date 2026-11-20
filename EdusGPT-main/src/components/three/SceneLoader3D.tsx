@@ -21,6 +21,7 @@ export function SceneLoader3D({
   label,
   progress,
   height = 220,
+  className,
 }: {
   /** e.g. "Writing scene 4…" — what the wait is for, in the screen's language. */
   label: string;
@@ -28,6 +29,8 @@ export function SceneLoader3D({
   progress: number;
   /** Canvas height in px; the classroom hero uses a taller stage. */
   height?: number;
+  /** Optional extra styling on the outer card wrapper. */
+  className?: string;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [noWebGL, setNoWebGL] = useState(false);
@@ -54,8 +57,16 @@ export function SceneLoader3D({
       return;
     }
 
-    const width = Math.max(host.clientWidth, 280);
     const stageH = Math.max(160, height);
+    const getHostWidth = () => {
+      const clientW = host.clientWidth;
+      if (clientW > 0) return clientW;
+      const parentW = host.parentElement?.clientWidth;
+      if (parentW && parentW > 0) return parentW;
+      return 280;
+    };
+    const width = getHostWidth();
+
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, stageH, false);
     renderer.domElement.style.width = "100%";
@@ -292,6 +303,35 @@ export function SceneLoader3D({
     };
     raf = requestAnimationFrame(tick);
 
+    const syncSize = (targetWidth?: number) => {
+      const w = targetWidth && targetWidth > 0 ? targetWidth : getHostWidth();
+      if (w <= 0) return;
+      camera.aspect = w / stageH;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, stageH, false);
+      if (visible) {
+        renderer.render(scene, camera);
+      }
+    };
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const cr = entry.contentRect;
+          if (cr.width > 0) {
+            syncSize(cr.width);
+          }
+        }
+      });
+      resizeObserver.observe(host);
+    }
+
+    const onWindowResize = () => {
+      syncSize();
+    };
+    window.addEventListener("resize", onWindowResize);
+
     const observer = new IntersectionObserver(
       (entries) => {
         const seen = entries.some((entry) => entry.isIntersecting);
@@ -309,6 +349,10 @@ export function SceneLoader3D({
     observer.observe(host);
 
     return () => {
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      window.removeEventListener("resize", onWindowResize);
       observer.disconnect();
       cancelAnimationFrame(raf);
       disposables.forEach((geometry) => geometry.dispose());
@@ -325,8 +369,15 @@ export function SceneLoader3D({
   const stageStyle = { height: `${Math.max(160, height)}px` } as const;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-brand-700/50 bg-ink-950/70">
-      <div ref={hostRef} className="relative" aria-hidden="true">
+    <div
+      className={`w-full min-w-0 overflow-hidden rounded-xl border border-brand-700/50 bg-ink-950/70 ${className ?? ""}`}
+    >
+      <div
+        ref={hostRef}
+        className="relative w-full overflow-hidden"
+        style={stageStyle}
+        aria-hidden="true"
+      >
         {noWebGL ? (
           <div className="flex items-center justify-center" style={stageStyle}>
             <span className="h-16 w-16 animate-ping rounded-full border-2 border-brand-400/60" />
@@ -335,8 +386,8 @@ export function SceneLoader3D({
       </div>
       <div className="space-y-1.5 px-4 pb-4">
         <p className="flex items-center gap-2 text-sm font-medium text-mist-100">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-gold-400" />
-          {label}
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-gold-400" />
+          <span className="truncate">{label}</span>
         </p>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-800">
           <div
