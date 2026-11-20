@@ -442,9 +442,15 @@ export function coerceLesson(input: unknown): Lesson | null {
       // contents would otherwise imply. Both are optional and the renderer falls
       // back to the layout when blocks are missing.
       blocks: sanitizeBlocks(scene.blocks),
-      layout: SLIDE_LAYOUTS.includes(asString(scene.layout) as SlideLayout)
-        ? (asString(scene.layout) as SlideLayout)
-        : undefined,
+      layout: (() => {
+        const raw = SLIDE_LAYOUTS.includes(asString(scene.layout) as SlideLayout)
+          ? (asString(scene.layout) as SlideLayout)
+          : undefined;
+        if (raw && (raw === "spotlight" || raw === "quote") && bullets.length >= 2) {
+          return bullets.length >= 4 ? "compare" : bullets.length >= 3 ? "two-col" : "statement";
+        }
+        return raw;
+      })(),
       quiz,
       simulation3d,
       start: asNumber(scene.start, 0),

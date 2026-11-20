@@ -95,8 +95,7 @@ const COPY = {
     warnKeyTail:
       "in the top corner — it takes about a minute. You can still watch the sample lesson in the player.",
     topicLabel: "What do you want to teach?",
-    topicPlaceholder:
-      "e.g. Explain the law of conservation of energy to grade 10 students, with one everyday example",
+    topicPlaceholder: "Enter what you want to learn",
     notesLabel: "Focus & extra instructions",
     notesOptional: "(optional)",
     notesPlaceholder:
@@ -105,6 +104,7 @@ const COPY = {
     chipFormulas: "📐 Focus on formulas",
     chipRealWorld: "🚗 Real-world examples",
     chipBeginner: "👶 Beginner-friendly",
+    chipVisuals: "🖼️ Visual illustrations",
     contextLabel: "Context:",
     contextDrop: "drop documents here, or",
     contextPick: "choose files",
@@ -256,8 +256,7 @@ const COPY = {
     warnKeyTail:
       "ở góc trên, mất khoảng một phút. Bạn vẫn xem được bài mẫu ở trang trình phát.",
     topicLabel: "Bạn muốn dạy bài gì?",
-    topicPlaceholder:
-      "Ví dụ: Giải thích định luật bảo toàn năng lượng cho học sinh lớp 10, có một ví dụ đời thường",
+    topicPlaceholder: "Nhập nội dung bạn muốn học",
     notesLabel: "Trọng tâm & yêu cầu thêm",
     notesOptional: "(tùy chọn)",
     notesPlaceholder:
@@ -266,6 +265,7 @@ const COPY = {
     chipFormulas: "📐 Nhấn mạnh công thức",
     chipRealWorld: "🚗 Nhiều ví dụ thực tế",
     chipBeginner: "👶 Dành cho người mới",
+    chipVisuals: "🖼️ Minh hoạ trực quan",
     contextLabel: "Ngữ cảnh:",
     contextDrop: "thả tài liệu vào đây, hoặc",
     contextPick: "chọn tệp",
@@ -582,9 +582,6 @@ export function StudioPanel() {
     });
   }, []);
 
-  useEffect(() => {
-    if (!topic) setTopic(presets[0]);
-  }, [presets, topic]);
   // How long the lesson should run. Kept beside the style rather than folded into
   // it, because the two are independent: a long minimalist lecture and a short
   // visual story are both reasonable, and a preset that hard-coded both would
@@ -873,6 +870,7 @@ export function StudioPanel() {
   }, []);
 
   const generate = useCallback(async () => {
+    if (!topic.trim()) return;
     setError(null);
     setSavedId(null);
 
@@ -1165,6 +1163,10 @@ export function StudioPanel() {
               {
                 label: t.chipBeginner,
                 text: lang === "vi" ? "Dễ hiểu cho người mới bắt đầu, giải thích từng bước" : "Beginner-friendly, step-by-step intuition",
+              },
+              {
+                label: t.chipVisuals,
+                text: lang === "vi" ? "Thêm ảnh minh họa trực quan sinh động cho các khái niệm và hiện tượng" : "Add vivid visual illustrations for concepts and phenomena",
               },
             ].map((chip) => (
               <button
@@ -1491,7 +1493,7 @@ export function StudioPanel() {
             data-tour="studio-submit"
             onClick={() => void generate()}
             className="inline-flex select-none items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-ember-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold px-7 py-3 text-base shadow-xl shadow-orange-500/25 active:scale-95 transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={busy || !status?.configured}
+            disabled={busy || !status?.configured || !topic.trim()}
           >
             {busy ? (
               <LoaderCircle className="h-5 w-5 animate-spin" />

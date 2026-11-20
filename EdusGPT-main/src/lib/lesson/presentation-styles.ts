@@ -176,18 +176,19 @@ export const PRESENTATION_STYLES: readonly PresentationStyle[] = [
     hint: "Chữ to, nền trắng, mỗi slide một ý. Dạng slide lời giảng, một câu một ý.",
     hintEn: "Big type, white paper, one idea per slide. Spoken-word slides, one sentence each.",
     theme: "paper",
-    images: false,
+    images: true,
     icons: false,
     rules: `
 # PHONG CÁCH: MINIMALIST PRESENTATION
 Đây là slide thuyết trình tối giản, xem như một câu chữ lớn trên nền trống.
-- MỖI slide chỉ có MỘT ý, viết bằng MỘT câu. Tối đa 2 gạch đầu dòng, mỗi gạch
+- MỖI slide chỉ có MỘT ý, viết bằng MỘT câu. Tối đa 2-3 gạch đầu dòng ngắn, mỗi gạch
   dưới 60 ký tự. Cấm đoạn văn dài trên slide.
 - Tiêu đề là câu khẳng định ngắn gọn, dưới 45 ký tự. Đừng viết tiêu đề dài.
-- Để trống rất nhiều khoảng trắng; đừng nhồi mọi thứ vào một slide.
+- Tự động viết "imagePrompt" cho slide giải thích hiện tượng, đồ vật hoặc ví dụ thực tế
+  (chọn layout "image-right" để ảnh và chữ song song cân đối). Với slide thuần công thức
+  thì bỏ "imagePrompt" để giữ khoảng trắng tối giản.
 - Ưu tiên "formula" và "data" hơn là liệt kê. Một con số nói thay cả đoạn văn.
-- TUYỆT ĐỐI không dùng "table" (bảng nhồi chữ, trái tinh thần tối giản) và
-  không dùng "imageQuery" (hình ảnh làm loãng, chỉ chữ là chủ đạo).
+- TUYỆT ĐỐI không dùng "table" (bảng nhồi chữ, trái tinh thần tối giản).
 - "narration" vẫn viết đầy đủ 3-4 câu như lời giảng thật, vì người xem nghe
   chứ không đọc slide.`,
   },
@@ -202,7 +203,7 @@ export const PRESENTATION_STYLES: readonly PresentationStyle[] = [
     rules: `
 # PHONG CÁCH: VISUAL STORY
 Slide là một bức ảnh kể chuyện, chữ chỉ để đặt ngữ cảnh.
-- Mỗi slide PHẢI có "imageQuery" — đây là yêu cầu cốt lõi của phong cách này.
+- Mỗi slide PHẢI có "imagePrompt" — đây là yêu cầu cốt lõi của phong cách này.
   Ảnh phải là đối tượng thật đang được nói tới, chụp/sơ đồ thật từ web.
 - Chữ tối thiểu: tối đa 2 gạch đầu dòng, mỗi gạch dưới 50 ký tự. Ảnh phải
   thừa chỗ để đọc, đừng chen chữ lên ảnh.
@@ -216,16 +217,16 @@ Slide là một bức ảnh kể chuyện, chữ chỉ để đặt ngữ cảnh
     hint: "Nhiều gạch đầu dòng, bảng và biểu đồ. Hợp toán, hoá, lịch sử.",
     hintEn: "Many bullets, tables and charts. Fits math, chemistry, history.",
     theme: "chalk",
-    images: false,
+    images: true,
     icons: true,
     rules: `
 # PHONG CÁCH: CLASSROOM SLIDES
 Slide như trong sách giáo khoa: đủ thông tin để học sinh chép và ghi nhớ.
 - 3-4 gạch đầu dòng, mỗi gạch có định nghĩa hoặc ví dụ cụ thể.
-- Bảng ("table") và biểu đồ ("data") được KHUYẾN NGHỊ mạnh ở phong cách này —
-  đây là kiểu duy nhất trong ba kiểu mà bảng số thật sự hợp lý.
+- Bảng ("table") và biểu đồ ("data") được KHUYẾN NGHỊ mạnh ở phong cách này.
+- Khi có hiện tượng hoặc mô hình thực tế, dùng "imagePrompt" với layout "image-right"
+  để kết hợp hài hoà giữa lý thuyết và hình ảnh minh hoạ.
 - "formula" dùng mỗi khi có công thức, kèm giải thích từng thành phần.
-- Không dùng "imageQuery": bảng và biểu đồ đã là hình ảnh của slide.
 - "narration" giảng thẳng, gọi tên định nghĩa, ví dụ số cụ thể.`,
   },
   {
