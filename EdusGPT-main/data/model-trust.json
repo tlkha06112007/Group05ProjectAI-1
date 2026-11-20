@@ -11,10 +11,10 @@
     {
       "provider": "stealth",
       "model": "openai/gpt-oss-120b",
-      "lessonId": "lesson-mwmvl2jg-llh56s",
+      "lessonId": "lesson-mwox7kfq-8z3029",
       "scenes": 5,
-      "words": 306,
-      "verifiedAt": "2026-11-19T01:37:29.194Z"
+      "words": 335,
+      "verifiedAt": "2026-11-20T12:00:20.871Z"
     }
   ]
 }

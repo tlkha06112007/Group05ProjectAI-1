@@ -95,9 +95,11 @@ function writeHidden(keys: Set<string>): void {
 export function SlideImageView({
   lessonId,
   scene,
+  active = true,
 }: {
   lessonId: string;
   scene: Lesson["scenes"][number];
+  active?: boolean;
 }) {
   const t = useCopy(COPY);
   /**
@@ -134,8 +136,12 @@ export function SlideImageView({
     "generated",
   );
 
-  const query = scene.imageQuery?.trim() ?? "";
-  const prompt = scene.imagePrompt?.trim() ?? "";
+  const rawQuery = (scene.imageQuery ?? "").trim();
+  const prompt = (scene.imagePrompt ?? "").trim();
+  const query =
+    rawQuery ||
+    (prompt ? prompt.replace(/no text|clean composition|illustration|drawing/gi, "").trim() : "") ||
+    scene.title;
   // A generated picture needs no search: its URL is pure arithmetic on the
   // lesson, the scene and the prompt. It still goes through the same
   // hide/show state as an archive picture, so a dismissed slide stays
@@ -164,6 +170,7 @@ export function SlideImageView({
   }, [key]);
 
   useEffect(() => {
+    if (!active && !image) return;
     setImage(null);
     setFailed(false);
     setHidden(false);
@@ -275,12 +282,8 @@ export function SlideImageView({
                   loaded ? "opacity-100" : "opacity-0"
                 }`}
                 onError={() => {
-                  if (generatedUrl && stage === "generated" && retry < 1) {
-                    window.setTimeout(() => {
-                      setRetry((current) => (current < 1 ? current + 1 : current));
-                    }, 2500);
-                  } else if (stage === "generated") {
-                    // The AI render is dead: the effect drops to the archive.
+                  if (stage === "generated") {
+                    // Fall back immediately to open archive (Wikimedia Commons / Openverse)
                     setStage("archive");
                   } else if (stage === "archive") {
                     // The archive has nothing: the effect drops to the plate.
@@ -455,8 +458,12 @@ export function SlideImagePreload({
   lessonId?: string;
   scene: Lesson["scenes"][number];
 }) {
-  const query = scene.imageQuery?.trim() ?? "";
-  const prompt = scene.imagePrompt?.trim() ?? "";
+  const rawQuery = (scene.imageQuery ?? "").trim();
+  const prompt = (scene.imagePrompt ?? "").trim();
+  const query =
+    rawQuery ||
+    (prompt ? prompt.replace(/no text|clean composition|illustration|drawing/gi, "").trim() : "") ||
+    scene.title;
 
   useEffect(() => {
     // A generated picture is just a URL: warming it is one cache fill, no

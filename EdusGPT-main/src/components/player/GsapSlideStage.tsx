@@ -567,7 +567,11 @@ export function GsapSlideStage({
     const observer = new ResizeObserver(fit);
     observer.observe(stage);
     stage.querySelectorAll<HTMLElement>(".scene-card").forEach((card) => observer.observe(card));
-    return () => observer.disconnect();
+    stage.addEventListener("load", fit, true);
+    return () => {
+      observer.disconnect();
+      stage.removeEventListener("load", fit, true);
+    };
   }, [lesson]);
 
   return (
@@ -622,7 +626,8 @@ export function GsapSlideStage({
               scene.simulation3d ||
               (scene.kind === "quiz" && scene.quiz) ||
               (scene.imagePrompt ?? "").trim() ||
-              (scene.imageQuery ?? "").trim(),
+              (scene.imageQuery ?? "").trim() ||
+              scene.image?.url,
           );
 
           const requested: SlideLayout =
@@ -630,17 +635,25 @@ export function GsapSlideStage({
               ? (scene.layout as SlideLayout)
               : defaultSlideLayout(scene);
 
-          const hasPicture = Boolean(
-            (scene.imagePrompt ?? "").trim() || (scene.imageQuery ?? "").trim()
-          );
+          const hasContent =
+            scene.bullets.length > 0 || ((scene.steps?.length ?? 0) > 0);
 
-          // If a slide has a picture or figure AND has bullets: split layout gives balanced, beautiful two-column presentation
+          // If a slide has a picture or figure AND has bullets/steps: split layout gives balanced,
+          // beautiful two-column presentation without text overlapping the figure/diagram.
           const shouldSplit =
+            hasFigure &&
+            scene.kind !== "quiz" &&
+            hasContent &&
             (requested === "image-left" ||
               requested === "image-right" ||
               ((requested === "cards" || requested === "statement" || requested === "two-col") &&
                 hasPicture &&
-                scene.bullets.length >= 2)) &&
+                scene.bullets.length >= 2) ||
+              requested === "compare" ||
+              requested === "flow" ||
+              requested === "spotlight" ||
+              requested === "quote" ||
+              (requested === "full-figure" && scene.bullets.length > 2)) &&
             hasFigure &&
             scene.kind !== "quiz";
 
@@ -736,7 +749,11 @@ export function GsapSlideStage({
                   />
                 </FigureZoom>
               ) : (
-                <SlideImageView lessonId={lesson.id} scene={scene} />
+                <SlideImageView
+                  lessonId={lesson.id}
+                  scene={scene}
+                  active={Math.abs(index - activeScene) <= 1}
+                />
               )}
             </div>
           );
@@ -811,7 +828,7 @@ export function GsapSlideStage({
                   ) : null}
                 </div>
               ) : (
-                <div className="scene-standard-body relative z-10 flex flex-col justify-center flex-1 min-h-0 w-full space-y-3">
+                <div className="scene-standard-body relative z-10 flex flex-col justify-start flex-1 min-h-0 w-full space-y-3">
                   {text}
                   {hasFigure && figure}
                 </div>

@@ -144,7 +144,8 @@ export function SlideSurface({
       scene.simulation3d ||
       (scene.kind === "quiz" && scene.quiz) ||
       (scene.imagePrompt ?? "").trim() ||
-      (scene.imageQuery ?? "").trim(),
+      (scene.imageQuery ?? "").trim() ||
+      scene.image?.url,
   );
   // A scene with no picture cannot be an "image beside the text" slide; asking
   // for one would leave the room the renderer reserved empty.
@@ -153,16 +154,23 @@ export function SlideSurface({
       ? (scene.layout as SlideLayout)
       : defaultSlideLayout(scene);
 
-  const hasPicture = Boolean(
-    (scene.imagePrompt ?? "").trim() || (scene.imageQuery ?? "").trim()
-  );
+  const hasContent =
+    scene.bullets.length > 0 || ((scene.steps?.length ?? 0) > 0);
 
   const shouldSplit =
+    hasFigure &&
+    scene.kind !== "quiz" &&
+    hasContent &&
     (requested === "image-left" ||
       requested === "image-right" ||
       ((requested === "cards" || requested === "statement" || requested === "two-col") &&
         hasPicture &&
-        scene.bullets.length >= 2)) &&
+        scene.bullets.length >= 2) ||
+      requested === "compare" ||
+      requested === "flow" ||
+      requested === "spotlight" ||
+      requested === "quote" ||
+      (requested === "full-figure" && scene.bullets.length > 2)) &&
     hasFigure &&
     scene.kind !== "quiz";
 
@@ -313,7 +321,13 @@ export function SlideSurface({
   const text = (
     <>
       {scene.bullets.length > 0 ? (
-        <ul className="scene-body relative z-10 grid w-full gap-x-[6%] sm:grid-cols-2">
+        <ul
+          className={`scene-body relative z-10 grid w-full gap-2.5 sm:gap-3 ${
+            split || scene.bullets.length <= 2
+              ? "grid-cols-1 max-w-full"
+              : "sm:grid-cols-2 max-w-[92%]"
+          }`}
+        >
           {scene.bullets.map((bullet, bulletIndex) => (
             <li
               key={bullet}
@@ -525,15 +539,17 @@ export function SlideSurface({
                 {figure}
               </div>
             ) : layout === "full-figure" ? (
-              <>
-                {figure}
-                {text}
-              </>
+              <div className="scene-full-figure relative z-10 flex flex-col items-center justify-center flex-1 min-h-0 w-full max-w-[92%] mx-auto my-auto space-y-2">
+                <div className="w-full flex justify-center min-h-0">{figure}</div>
+                {scene.bullets.length > 0 && scene.bullets.length <= 2 ? (
+                  <div className="w-full opacity-90">{text}</div>
+                ) : null}
+              </div>
             ) : (
-              <>
+              <div className="scene-standard-body relative z-10 flex flex-col justify-start flex-1 min-h-0 w-full space-y-3">
                 {text}
-                {figure}
-              </>
+                {hasFigure && figure}
+              </div>
             )}
               </>
             )}
