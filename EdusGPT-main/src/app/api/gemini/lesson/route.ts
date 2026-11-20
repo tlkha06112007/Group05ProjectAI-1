@@ -454,7 +454,7 @@ const SLIDE_DESIGN_RULES = `QUY TẮC BỐ CỤC SLIDE (bắt buộc — đây l
    - "full-figure": cảnh có bảng, biểu đồ, công thức hoặc đồ thị — hình chiếm
      phần lớn diện tích, chữ thu gọn lại.
    Bài đẹp là bài CÓ LẬT layout, không phải bài 12 slide cùng một khuôn.
-    - Trong một bài, hãy phân bố: 1 "cover", vài "spotlight"/"quote" cho ý cốt lõi,
+    - Trong một bài, hãy phân bố: 1 "cover", 1-2 "spotlight"/"quote" (CHỈ DÙNG cho ý cốt lõi có 0-1 gạch đầu dòng, tuyệt đối không dùng khi có 2 gạch trở lên hoặc có ảnh),
       1-2 "flow" cho quy trình, phần còn lại "statement"/"two-col"/"cards"/
       "image-right" tuỳ nội dung. Đừng để 3 slide liền nhau cùng một layout.
 9. "blocks" — TỰ DO ĐẶT KHỐI: chỉ dùng khi cần bố cục đặc biệt (lưới 1000x562.5, x: 50-950, y: 30-500, các khối không chồng lấn). Cảnh bình thường BỎ "blocks", để "layout" tự sắp xếp chuẩn nhất.`;
@@ -693,25 +693,21 @@ function bankPrompt(
  * to be concrete enough that a picture generator can draw it.
  */
 const IMAGE_MODE_RULES = `
-# CHẾ ĐỘ CÓ ẢNH MINH HOẠ (bắt buộc)
-Slide này được dựng thành bài giảng, nên hình ảnh là phần quan trọng nhất bên cạnh chữ.
-Ảnh do AI vẽ trực tiếp từ mô tả của cảnh (pollinations.ai, không cần key), KHÔNG
-phải ảnh tìm trên mạng — nên mô tả càng cụ thể, ảnh càng đúng ý.
-- "imagePrompt" là BẮT BUỘC với mọi cảnh trừ: cảnh "quiz" và cảnh "summary" (tóm tắt).
-  Đặc biệt: cảnh "cover" (mở đầu) NÊN có "imagePrompt" minh hoạ thật ấn tượng để làm ảnh bìa thumbnail cho toàn bộ bài giảng.
-- Viết bằng TIẾNG ANH, một câu mô tả chi tiết và thẩm mỹ: đối tượng cụ thể + hành động/bối cảnh +
-  phong cách vẽ (minh hoạ khoa học, sơ đồ 3D hoặc vector sắc nét) + ánh sáng sạch, màu sắc hài hoà.
-  Thêm "no text, no words, no letters" để ảnh không dính chữ sai.
-  Đúng: "detailed scientific cross-section illustration of a human heart with arteries and ventricles, soft studio lighting, clean background, no text, 8k resolution",
+# CHẾ ĐỘ CÓ ẢNH MINH HOẠ
+Slide này được dựng thành bài giảng trực quan, hình ảnh minh họa sinh động là phần rất quan trọng bên cạnh câu chữ.
+Ảnh do AI vẽ trực tiếp từ mô tả của cảnh (pollinations.ai, không cần key), KHÔNG phải ảnh tìm trên mạng.
+- Tự động viết "imagePrompt" cho các slide cần tính trực quan: hiện tượng thực tế, thí nghiệm, cấu tạo, đồ vật, sinh học, địa lý, lịch sử, mô hình khoa học.
+- Khi một cảnh CÓ "imagePrompt", hãy chọn layout "image-right" (hoặc "image-left") với 2-4 gạch đầu dòng ngắn gọn để ảnh và chữ đứng cạnh nhau cân đối, không được chọn "cards" hay dồn chữ đè lên ảnh.
+- Với các cảnh thuần công thức toán học ("formula"), bảng dày đặc ("table") hoặc trắc nghiệm ("quiz"), KHÔNG cần "imagePrompt" để slide sạch sẽ, không rối mắt.
+- Đặc biệt: cảnh "cover" (mở đầu) NÊN có "imagePrompt" minh hoạ thật ấn tượng để làm ảnh bìa thumbnail cho toàn bộ bài giảng.
+- Viết "imagePrompt" bằng TIẾNG ANH, một câu mô tả chi tiết và thẩm mỹ: đối tượng cụ thể + hành động/bối cảnh + phong cách vẽ (minh hoạ khoa học, vector giáo khoa sắc nét hoặc 3D render) + ánh sáng sạch, màu sắc hài hoà.
+  Luôn thêm "no text, no words, no letters" để ảnh tuyệt đối không dính chữ sai.
+  Đúng: "detailed scientific vector illustration of a moving car with velocity vectors, clean educational textbook style, no text, 8k resolution",
         "3d render of solar system planets orbiting the sun with luminous asteroid belt, deep space background, highly detailed, no text",
-        "minimalist vector diagram of a car accelerating with force vectors, modern educational textbook style, no text".
+        "cross-section illustration of a human heart with arteries, soft studio lighting, clean background, no text".
   Sai: "sinh học lớp 10", "bài 5", "human heart" (quá chung, ảnh ra tuỳ hứng).
-- Với môn KHÔNG có hình thật (lập trình, toán giải tích, thuật toán), mô tả SƠ ĐỒ
-  của khái niệm: "flowchart diagram of a for loop with arrows, minimal flat
-  style, no text". Sơ đồ AI vẽ còn đúng ý hơn ảnh chụp không liên quan.
-- Cấm tuyệt đối: tên riêng, logo, người nổi tiếng, và mọi từ có dấu tiếng Việt.
-- Nếu một cảnh thật sự không minh hoạ được, bù lại bằng "visualNote" mô tả rõ sơ
-  đồ cần vẽ, đừng bịa một mô tả cho có. Ảnh sai còn tệ hơn không có ảnh.`;
+- Với môn KHÔNG có hình thật (lập trình, thuật toán), mô tả SƠ ĐỒ khái niệm: "flowchart diagram of a for loop with arrows, minimal flat style, no text".
+- Cấm tuyệt đối: tên riêng, logo, người nổi tiếng, và mọi từ có dấu tiếng Việt.`;
 
 /** With illustrations off, the model is told to spend the effort elsewhere. */
 const NO_IMAGE_MODE_RULES = `
@@ -1193,7 +1189,7 @@ export async function POST(request: NextRequest) {
 
   // The style decides the picture policy; the switch overrides it. Defaulting
   // to the style rather than to `true` is what makes "minimalist" mean anything.
-  const useImages = body.useImages ?? style.images;
+  const useImages = body.useImages ?? (style.images !== undefined ? style.images : true);
 
   // The length preset owns the scene count, because a scene count and a duration
   // are the same decision written twice. The cap is raised well past the longest
@@ -2068,6 +2064,13 @@ Chỉ trả về tiêu đề và mục tiêu từng cảnh, chưa viết nội d
               scene.mindmap = {
                 branches: mindmapSnapshot(plan.branches, index, diagramScenes.length).branches,
               };
+              // If the diagram scene also has bullets, ensure layout is split so cards/bullets don't overlap the mindmap
+              const hasBullets = Array.isArray(scene.bullets) && scene.bullets.length > 0;
+              if (hasBullets) {
+                scene.layout = "image-right";
+              } else {
+                scene.layout = "full-figure";
+              }
             });
           }
         }

@@ -176,7 +176,7 @@ export function defaultSlideLayout(
       (typeof scene.imageQuery === "string" && scene.imageQuery.trim()),
   );
   if (scene.kind === "cover" && bullets <= 1) return "cover";
-  if (hasFigure) return "full-figure";
+  if (hasFigure) return bullets >= 2 ? "image-right" : "full-figure";
   // A worked sequence reads as a journey, not a list: the steps become stations
   // on a line, which is friendlier to follow than a numbered column.
   if (steps >= 2) return "flow";

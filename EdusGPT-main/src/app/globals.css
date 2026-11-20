@@ -1401,6 +1401,12 @@
     line-height: 1.02;
   }
 
+  .scene-layout-spotlight:has(.scene-body) .scene-title,
+  .scene-layout-spotlight:has(.scene-content-text) .scene-title {
+    font-size: calc(3.8cqw * var(--slide-fit, 1));
+    line-height: 1.18;
+  }
+
   .scene-layout-spotlight .scene-rule {
     margin-inline: auto;
     width: 9%;
@@ -2401,6 +2407,7 @@
   .scene-standard-body {
     display: flex;
     flex-direction: column;
+    justify-content: flex-start;
     gap: 1.1cqw;
     width: 100%;
     flex: 1 1 auto;
@@ -2431,6 +2438,17 @@
     width: 100%;
     flex: 0 1 auto;
     min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+  }
+
+  .scene-split .scene-body {
+    grid-template-columns: 1fr !important;
+    max-width: 100% !important;
+  }
+
+  .scene-split .scene-body .scene-bullet {
+    width: 100%;
   }
 
   .scene-split-text {
