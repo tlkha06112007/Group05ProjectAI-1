@@ -819,7 +819,7 @@ function GenerationLoadingHero({
         </div>
 
         {/* 3D Robot Animated Scene */}
-        <div className="relative mx-auto mb-3 flex w-full justify-center">
+        <div className="relative mx-auto mb-3 w-full">
           <SceneLoader3D label={statusMessage} progress={clamped} height={210} />
         </div>
 

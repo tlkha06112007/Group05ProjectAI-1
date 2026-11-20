@@ -135,7 +135,7 @@ export default function LessonClient({ courseId, initialMode }: LessonClientProp
             <span className="h-1.5 w-1.5 rounded-full bg-mist-500/60" />
           </div>
 
-          <div className="relative mx-auto mb-2 flex w-full justify-center">
+          <div className="relative mx-auto mb-2 w-full">
             <SceneLoader3D label={t.lessonLoading} progress={30} height={190} />
           </div>
 
