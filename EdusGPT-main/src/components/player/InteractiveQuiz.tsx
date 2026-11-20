@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CircleCheck, CircleX, CircleHelp } from "lucide-react";
+import { CircleCheck, CircleX, CircleHelp, ArrowRight } from "lucide-react";
 import type { QuizOption, QuizQuestion } from "@/lib/lesson/types";
 import { cleanQuizExplanation, quizPraiseTier, quizQuestionsOf, quizReadSeconds } from "@/lib/lesson/quiz";
 import { InlineText } from "./InlineText";
@@ -240,7 +240,8 @@ export function InteractiveQuiz({ sceneId, question, options, questions, autoNex
       <div className="scene-quiz-actions">
         {submitted && isBank && !isLast ? (
           <button type="button" onClick={handleNext} className="scene-quiz-button" data-primary="">
-            {t.quizNext}
+            <span>{t.quizNext}</span>
+            <ArrowRight className="h-[1.15em] w-[1.15em] shrink-0" aria-hidden="true" />
           </button>
         ) : readSeconds !== null && autoNextPending && isLast ? (
           <span className="scene-quiz-auto">

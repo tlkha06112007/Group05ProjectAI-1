@@ -179,7 +179,7 @@ export function SlideSurface({
     : requested === "full-figure"
     ? "full-figure"
     : requested;
-  const split = layout === "image-left" || layout === "image-right";
+  const split = shouldSplit;
 
   /**
    * Free layout: when the scene brings its own geometry, that geometry is the
@@ -220,9 +220,7 @@ export function SlideSurface({
   const interactive =
     !placed &&
     Boolean(
-      scene.simulation3d ||
-        scene.kind === "simulation3d" ||
-        (scene.kind === "quiz" && scene.quiz),
+      (scene.simulation3d || scene.kind === "simulation3d") && scene.kind !== "quiz",
     );
 
   /**
