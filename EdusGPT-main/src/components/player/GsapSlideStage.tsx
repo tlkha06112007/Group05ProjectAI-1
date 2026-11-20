@@ -641,7 +641,8 @@ export function GsapSlideStage({
               ((requested === "cards" || requested === "statement" || requested === "two-col") &&
                 hasPicture &&
                 scene.bullets.length >= 2)) &&
-            hasFigure;
+            hasFigure &&
+            scene.kind !== "quiz";
 
           const layout: SlideLayout = shouldSplit
             ? requested === "image-left"
@@ -650,7 +651,7 @@ export function GsapSlideStage({
             : requested === "full-figure"
             ? "full-figure"
             : requested;
-          const isSplit = layout === "image-left" || layout === "image-right";
+          const isSplit = (layout === "image-left" || layout === "image-right") && scene.kind !== "quiz";
 
           const text = (
             <div className="scene-content-text w-full space-y-3">
@@ -753,7 +754,7 @@ export function GsapSlideStage({
               ) : null}
               <div
                 className={`scene-fit scene-layout-${layout}${
-                  scene.simulation3d || scene.kind === "simulation3d" || scene.quiz
+                  (scene.simulation3d || scene.kind === "simulation3d") && scene.kind !== "quiz"
                     ? " scene-has-interactive"
                     : ""
                 }`}

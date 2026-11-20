@@ -2013,7 +2013,8 @@
    */
   .scene-quiz {
     width: 100%;
-    max-width: 86%;
+    max-width: 95%;
+    margin-inline: auto;
     display: flex;
     flex-direction: column;
     gap: 0.9cqw;
@@ -2032,32 +2033,31 @@
   }
 
   .scene-quiz-question {
-    font-size: 1.75cqw;
-    line-height: 1.3;
+    font-size: 1.65cqw;
+    line-height: 1.35;
     font-weight: 700;
   }
 
   .scene-quiz-options {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.7cqw;
+    gap: 0.8cqw;
   }
 
   .scene-quiz-option {
     display: flex;
     align-items: center;
-    gap: 0.7cqw;
-    /* Padding is a fixed fraction of the slide, not a rem constant, so a 10px
-       row here and a 40px row on a fullscreen slide are the same design. */
-    padding: 0.7cqw 0.9cqw;
+    gap: 0.8cqw;
+    padding: 0.8cqw 1.2cqw;
     border: 1px solid var(--slide-rule);
-    border-radius: 0.7cqw;
+    border-radius: 0.8cqw;
     background: var(--slide-bg-sunk);
     color: var(--slide-ink-soft);
-    font-size: 1.3cqw;
-    line-height: 1.25;
+    font-size: 1.25cqw;
+    line-height: 1.3;
     text-align: left;
-    transition: border-color 120ms, background-color 120ms, color 120ms;
+    cursor: pointer;
+    transition: border-color 120ms, background-color 120ms, color 120ms, transform 120ms;
   }
 
   .scene-quiz-letter {
@@ -2109,7 +2109,12 @@
 
   .scene-quiz-actions {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
+    gap: 0.8cqw;
+    margin-top: 0.4cqw;
+    position: relative;
+    z-index: 30;
   }
 
   /* Where the "try again" button used to sit: the wait before the next slide.
@@ -2122,19 +2127,34 @@
   }
 
   .scene-quiz-button {
-    padding: 0.55cqw 1.2cqw;
-    border-radius: 0.6cqw;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4cqw;
+    padding: 0.65cqw 1.4cqw;
+    border-radius: 0.7cqw;
     border: 1px solid var(--slide-rule);
-    font-size: 1.15cqw;
-    font-weight: 600;
+    font-size: 1.2cqw;
+    font-weight: 700;
     color: var(--slide-ink-soft);
-    transition: border-color 120ms, color 120ms;
+    cursor: pointer;
+    transition: border-color 120ms, color 120ms, background-color 120ms, transform 120ms;
   }
 
   .scene-quiz-button[data-primary] {
     border-color: var(--slide-accent);
     background: var(--slide-accent);
     color: var(--slide-bg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .scene-quiz-button[data-primary]:hover:not(:disabled) {
+    filter: brightness(1.12);
+    transform: translateY(-1px);
+  }
+
+  .scene-quiz-button[data-primary]:active:not(:disabled) {
+    transform: translateY(0);
   }
 
   .scene-quiz-button:disabled {

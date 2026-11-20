@@ -163,7 +163,8 @@ export function SlideSurface({
       ((requested === "cards" || requested === "statement" || requested === "two-col") &&
         hasPicture &&
         scene.bullets.length >= 2)) &&
-    hasFigure;
+    hasFigure &&
+    scene.kind !== "quiz";
 
   const layout: SlideLayout = shouldSplit
     ? requested === "image-left"
@@ -172,7 +173,7 @@ export function SlideSurface({
     : requested === "full-figure"
     ? "full-figure"
     : requested;
-  const split = layout === "image-left" || layout === "image-right";
+  const split = (layout === "image-left" || layout === "image-right") && scene.kind !== "quiz";
 
   /**
    * Free layout: when the scene brings its own geometry, that geometry is the
@@ -213,9 +214,7 @@ export function SlideSurface({
   const interactive =
     !placed &&
     Boolean(
-      scene.simulation3d ||
-        scene.kind === "simulation3d" ||
-        (scene.kind === "quiz" && scene.quiz),
+      (scene.simulation3d || scene.kind === "simulation3d") && scene.kind !== "quiz",
     );
 
   /**
