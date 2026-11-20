@@ -97,6 +97,14 @@ const COPY = {
     topicLabel: "What do you want to teach?",
     topicPlaceholder:
       "e.g. Explain the law of conservation of energy to grade 10 students, with one everyday example",
+    notesLabel: "Focus & extra instructions",
+    notesOptional: "(optional)",
+    notesPlaceholder:
+      "e.g. Focus on formula W = Wd + Wt, teach in a straightforward way, emphasize elastic collisions, use a rollercoaster example…",
+    chipStraightforward: "⚡ Straightforward",
+    chipFormulas: "📐 Focus on formulas",
+    chipRealWorld: "🚗 Real-world examples",
+    chipBeginner: "👶 Beginner-friendly",
     contextLabel: "Context:",
     contextDrop: "drop documents here, or",
     contextPick: "choose files",
@@ -250,6 +258,14 @@ const COPY = {
     topicLabel: "Bạn muốn dạy bài gì?",
     topicPlaceholder:
       "Ví dụ: Giải thích định luật bảo toàn năng lượng cho học sinh lớp 10, có một ví dụ đời thường",
+    notesLabel: "Trọng tâm & yêu cầu thêm",
+    notesOptional: "(tùy chọn)",
+    notesPlaceholder:
+      "Ví dụ: Tập trung vào công thức W = Wđ + Wt, phong cách straightforward súc tích, đi sâu vào va chạm đàn hồi, ví dụ tàu lượn siêu tốc…",
+    chipStraightforward: "⚡ Thẳng thắn (Straightforward)",
+    chipFormulas: "📐 Nhấn mạnh công thức",
+    chipRealWorld: "🚗 Nhiều ví dụ thực tế",
+    chipBeginner: "👶 Dành cho người mới",
     contextLabel: "Ngữ cảnh:",
     contextDrop: "thả tài liệu vào đây, hoặc",
     contextPick: "chọn tệp",
@@ -555,6 +571,16 @@ export function StudioPanel() {
   const presets = useMemo(() => t.presetTopics.split(";"), [t.presetTopics]);
   const [status, setStatus] = useState<PublicAiStatus | null>(null);
   const [topic, setTopic] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const appendNote = useCallback((text: string) => {
+    setNotes((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return text;
+      if (trimmed.includes(text)) return prev;
+      return `${trimmed}; ${text}`;
+    });
+  }, []);
 
   useEffect(() => {
     if (!topic) setTopic(presets[0]);
@@ -744,6 +770,7 @@ export function StudioPanel() {
   ]);
 
   const hasCustomSettings =
+    Boolean(notes.trim()) ||
     styleId !== DEFAULT_PRESENTATION_STYLE ||
     lessonLength !== DEFAULT_LESSON_LENGTH ||
     theme !== DEFAULT_SLIDE_THEME ||
@@ -757,6 +784,7 @@ export function StudioPanel() {
     (Boolean(voice) && voice !== "hoaimy");
 
   const resetToDefaults = useCallback(() => {
+    setNotes("");
     setStyleId(DEFAULT_PRESENTATION_STYLE);
     setLessonLength(DEFAULT_LESSON_LENGTH);
     setTheme(DEFAULT_SLIDE_THEME);
@@ -858,7 +886,7 @@ export function StudioPanel() {
       grade: "",
       sceneCount,
       minutes,
-      notes: topic,
+      notes: notes.trim(),
       referenceMaterial: referenceText,
       language,
       theme,
@@ -872,7 +900,7 @@ export function StudioPanel() {
       lessonLength,
       quizSettings,
     });
-  }, [language, lessonLength, minutes, motion, pattern, pointerColor, quizSettings, referenceText, sceneCount, showPointer, stream, styleId, theme, topic, useImages, voice]);
+  }, [language, lessonLength, minutes, motion, notes, pattern, pointerColor, quizSettings, referenceText, sceneCount, showPointer, stream, styleId, theme, topic, useImages, voice]);
 
   /** Saves to the server library (survives a browser wipe) and mirrors to local. */
   const save = useCallback(async () => {
@@ -1091,6 +1119,64 @@ export function StudioPanel() {
             className="field resize-y font-sans text-base sm:text-lg"
             placeholder={t.topicPlaceholder}
           />
+        </div>
+
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="label flex items-center gap-1.5 text-xs font-semibold text-mist-300" htmlFor="notes">
+              <Sparkles className="h-3.5 w-3.5 text-brand-300" />
+              <span>{t.notesLabel}</span>
+              <span className="text-[11px] font-normal text-mist-400">{t.notesOptional}</span>
+            </label>
+            {notes ? (
+              <button
+                type="button"
+                onClick={() => setNotes("")}
+                className="text-[11px] text-mist-400 hover:text-mist-200 transition-colors underline underline-offset-2"
+              >
+                {lang === "vi" ? "Xoá ghi chú" : "Clear"}
+              </button>
+            ) : null}
+          </div>
+          <textarea
+            id="notes"
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            rows={2}
+            className="field resize-y font-sans text-xs sm:text-sm"
+            placeholder={t.notesPlaceholder}
+          />
+          {/* Quick chips */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-mist-400">{lang === "vi" ? "Gợi ý nhanh:" : "Quick add:"}</span>
+            {[
+              {
+                label: t.chipStraightforward,
+                text: lang === "vi" ? "Giải thích súc tích, trực diện (straightforward), ngắn gọn" : "Explain straightforwardly and concisely",
+              },
+              {
+                label: t.chipFormulas,
+                text: lang === "vi" ? "Tập trung giải thích bản chất công thức và bài tập áp dụng" : "Focus on formula intuition and practice problems",
+              },
+              {
+                label: t.chipRealWorld,
+                text: lang === "vi" ? "Đưa vào nhiều ví dụ đời sống thực tế sinh động" : "Include vivid real-world and everyday examples",
+              },
+              {
+                label: t.chipBeginner,
+                text: lang === "vi" ? "Dễ hiểu cho người mới bắt đầu, giải thích từng bước" : "Beginner-friendly, step-by-step intuition",
+              },
+            ].map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => appendNote(chip.text)}
+                className="inline-flex items-center rounded-lg border border-ink-700/80 bg-ink-900/60 px-2 py-1 text-[11px] font-medium text-mist-300 transition-colors hover:border-brand-500/50 hover:bg-brand-500/10 hover:text-mist-100 active:scale-[0.98]"
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex items-center justify-between text-xs text-mist-400">
