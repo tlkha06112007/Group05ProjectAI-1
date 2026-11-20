@@ -183,7 +183,7 @@ export function LessonLoadingModal({
         </div>
 
         {/* 3D Robot Animated Scene */}
-        <div className="relative mx-auto mb-2 flex w-full justify-center">
+        <div className="relative mx-auto mb-2 w-full">
           <SceneLoader3D label={statusMessage} progress={progress} height={190} />
         </div>
 
