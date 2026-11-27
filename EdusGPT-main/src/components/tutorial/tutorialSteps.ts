@@ -1,8 +1,22 @@
+export interface TutorialPreviewImage {
+  dark: string;
+  light: string;
+  alt: {
+    vi: string;
+    en: string;
+  };
+  legend?: {
+    vi: string[];
+    en: string[];
+  };
+}
+
 export interface TutorialStep {
   id: string;
   route: string;
   targetSelector?: string;
   pointerPlacement?: "top" | "bottom" | "left" | "right" | "center";
+  previewImage?: TutorialPreviewImage;
   title: {
     vi: string;
     en: string;
@@ -90,24 +104,43 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   },
   {
     id: "lesson-player",
-    route: "/lesson",
-    targetSelector: '[data-tour="player-scrubbar"]',
-    pointerPlacement: "top",
+    route: "/library",
+    pointerPlacement: "center",
     badge: {
       vi: "Coi bài giảng",
       en: "Watch Lesson",
     },
     title: {
-      vi: "Trình phát bài giảng tua từng giây ⏱️",
-      en: "YouTube-Style Precision Scrubbing ⏱️",
+      vi: "Trình phát bài giảng & Thanh điều khiển ⏱️",
+      en: "Interactive Player & Video Controls ⏱️",
     },
     description: {
-      vi: "Xem bài giảng với giao diện chuẩn YouTube: tua chính xác từng giây trên timeline đỏ, giọng đọc AI đồng bộ từng chữ, xem danh sách chương, lặp đoạn khó A→B và giải câu đố trắc nghiệm giữa bài.",
-      en: "Watch lessons YouTube-style: scrub second by second on the red timeline, listen to AI narration synced with captions, view chapter list, loop A→B, and take checkpoint quizzes.",
+      vi: "Xem bài giảng mượt mà như YouTube: kéo thanh timeline đa chương (xanh–vàng) để tua từng giây, dùng các nút chuyển cảnh / tua ±10s, lặp đoạn khó A→B, chỉnh tốc độ 0.5×–2× và bật toàn màn hình.",
+      en: "Watch lessons YouTube-style: scrub second by second across the multi-chapter timeline, jump scenes or seek ±10s, loop difficult parts A→B, adjust speed 0.5×–2×, and toggle fullscreen.",
+    },
+    previewImage: {
+      dark: "/tutorial/player-controls-dark.png",
+      light: "/tutorial/player-controls-light.png",
+      alt: {
+        vi: "Giao diện thanh timeline đa chương và các nút điều khiển trình phát bài giảng",
+        en: "Lesson player multi-chapter timeline and transport controls",
+      },
+      legend: {
+        vi: [
+          "Timeline phân chương: Chạm hoặc kéo để tua chính xác từng giây",
+          "Điều hướng & Âm thanh: Phát/Dừng, chuyển cảnh, tua ±10s, âm lượng",
+          "Tiện ích nâng cao: Lặp A→B, tốc độ 1×, phím tắt (?) và toàn màn hình",
+        ],
+        en: [
+          "Chapter timeline: Click or drag to scrub second by second",
+          "Transport & Audio: Play/Pause, prev/next scene, ±10s seek, volume",
+          "Extra tools: A→B loop, 1× speed, keyboard shortcuts (?) & fullscreen",
+        ],
+      },
     },
     highlightHint: {
-      vi: "Rê chuột trên thanh timeline đỏ để tua bài",
-      en: "Hover and drag on the red scrubbar to seek",
+      vi: "Mẹo: Khi mở bài học, bấm Space để phát/tạm dừng hoặc phím ? để xem phím tắt",
+      en: "Tip: Inside any lesson, press Space to play/pause or ? for keyboard shortcuts",
     },
   },
   {

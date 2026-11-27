@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { useTutorial } from "./TutorialContext";
 import { useLang } from "@/i18n/provider";
+import { useTheme } from "@/components/site/ThemeProvider";
 import {
   X,
   ChevronLeft,
@@ -33,6 +34,7 @@ export function TutorialTour() {
     goToStep,
   } = useTutorial();
   const lang = useLang();
+  const { theme } = useTheme();
   const pathname = usePathname();
 
   const [targetRect, setTargetRect] = useState<ElementRect | null>(null);
@@ -258,9 +260,9 @@ export function TutorialTour() {
           top: cardTop,
           left: cardLeft,
           transform: cardTransform,
-          maxWidth: "460px",
+          maxWidth: currentStep.previewImage ? "640px" : "460px",
         }}
-        className="fixed z-[9999] w-[calc(100vw-32px)] sm:w-full rounded-2xl border-2 border-amber-500/40 bg-ink-950 p-5 shadow-2xl shadow-black/80 text-mist-50 transition-all duration-300 ease-out animate-in fade-in zoom-in-95"
+        className="fixed z-[9999] max-h-[90vh] overflow-y-auto w-[calc(100vw-32px)] sm:w-full rounded-2xl border-2 border-amber-500/40 bg-ink-950 p-5 shadow-2xl shadow-black/80 text-mist-50 transition-all duration-300 ease-out animate-in fade-in zoom-in-95"
       >
         {/* Card Header: Mascot, Step Badge, Progress Bar, Close */}
         <div className="flex items-center justify-between gap-3 border-b border-ink-800/80 pb-3">
@@ -318,6 +320,40 @@ export function TutorialTour() {
           <p className="text-xs leading-relaxed text-mist-300 sm:text-sm">
             {currentStep.description[lang as "vi" | "en"]}
           </p>
+
+          {currentStep.previewImage ? (
+            <div className="space-y-2 pt-1">
+              <div className="overflow-hidden rounded-xl border border-ink-700/80 bg-ink-900/60 shadow-lg">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={
+                    theme === "light"
+                      ? currentStep.previewImage.light
+                      : currentStep.previewImage.dark
+                  }
+                  alt={currentStep.previewImage.alt[lang as "vi" | "en"]}
+                  width={1616}
+                  height={366}
+                  className="block h-auto w-full select-none"
+                />
+              </div>
+
+              {currentStep.previewImage.legend ? (
+                <ul className="grid gap-1.5 rounded-xl border border-ink-800/80 bg-ink-900/50 px-3 py-2 text-[11px] text-mist-300 sm:text-xs">
+                  {currentStep.previewImage.legend[lang as "vi" | "en"].map(
+                    (item, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-[10px] font-bold text-amber-400">
+                          {idx + 1}
+                        </span>
+                        <span>{item}</span>
+                      </li>
+                    ),
+                  )}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
 
           {currentStep.highlightHint ? (
             <div className="flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-800 dark:text-amber-300">

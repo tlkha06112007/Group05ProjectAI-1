@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo.png" width="120" alt="EdusGPT logo" />
+  <img src="EdusGPT-main/public/logo.png" width="120" alt="EdusGPT logo" />
 </p>
 
 <h1 align="center">EdusGPT</h1>
@@ -29,11 +29,11 @@
 Watch the official 30-second product tour showcasing the complete EdusGPT ecosystem:
 
 <div align="center">
-  <a href="public_html/video/intro.mp4" target="_blank" title="Click to watch the full 60 FPS HD Video with sound">
-    <img src="public_html/assets/intro-preview.gif" alt="EdusGPT Product Tour Preview" width="100%" style="max-width: 880px; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); border: 1px solid #334155;" />
+  <a href="EdusGPT-main/public_html/video/intro.mp4" target="_blank" title="Click to watch the full 60 FPS HD Video with sound">
+    <img src="EdusGPT-main/public_html/assets/intro-preview.gif" alt="EdusGPT Product Tour Preview" width="100%" style="max-width: 880px; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); border: 1px solid #334155;" />
   </a>
   <p align="center">
-    🎬 <b><a href="public_html/video/intro.mp4">▶️ Click Here to Watch / Download the Full 60 FPS Video with Sound (intro.mp4)</a></b> &nbsp;•&nbsp; 
+    🎬 <b><a href="EdusGPT-main/public_html/video/intro.mp4">▶️ Click Here to Watch / Download the Full 60 FPS Video with Sound (intro.mp4)</a></b> &nbsp;•&nbsp; 
     🌐 <b><a href="README.html">Open Interactive HTML Guide</a></b>
   </p>
 </div>
@@ -73,10 +73,11 @@ The intro video was captured and rendered at **60 FPS** in full HD (1920×1080).
 ## 🚀 Quick Start
 
 ### Windows:
-Double-click `run.bat`.
+Double-click `EdusGPT-main/run.bat`.
 
 ### macOS or Linux:
 ```bash
+cd EdusGPT-main
 chmod +x run.sh
 ./run.sh
 ```
@@ -119,12 +120,14 @@ Before running manually, configure your environment variables:
 
 ### Manual Run:
 ```bash
+cd EdusGPT-main
 npm install
 npm run dev          # Accessible at http://localhost:3000
 ```
 
 ### Runtime Health Check:
 ```powershell
+cd EdusGPT-main
 powershell -ExecutionPolicy Bypass -File scripts/smoke-test.ps1
 ```
 
@@ -140,7 +143,7 @@ Open `/setup` in your browser. EdusGPT supports two primary modes:
    - **Token Harbor**: Multi-model gateway.
    - Paste keys into the setup page, click **Test Key**, and save. Keys are securely stored in `.env` (`GROQ_API_KEY`, `NVIDIA_API_KEY`, `TOKENHARBOR_API_KEY`) and masked in the GUI.
 2. **Local AI Agent (No Cloud API Required)**:
-   - **Antigravity CLI (`agy`)**: Directly connects to your local document repository, indexes textbook chapters, and writes curriculum outlines without incurring cloud fees. See `docs/ANTIGRAVITY.md`.
+   - **Antigravity CLI (`agy`)**: Directly connects to your local document repository, indexes textbook chapters, and writes curriculum outlines without incurring cloud fees. See `EdusGPT-main/docs/ANTIGRAVITY.md`.
 
 ---
 
