@@ -248,7 +248,7 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
           setServerCourses(data.courses);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // --- stored & server-saved lessons synchronization -----------------------
@@ -362,7 +362,7 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
             window.history.pushState(null, "", `/lesson?c=${encodeURIComponent(selectedId)}`);
           }
         }
-      } catch {}
+      } catch { }
     },
     [clearLoop, lesson.id, library, tbPause, tbSeek],
   );
@@ -810,11 +810,10 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
                               <button
                                 type="button"
                                 onClick={() => void selectLessonById(item.id)}
-                                className={`flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
-                                  isCurrent
-                                    ? "bg-brand-500/15 text-mist-50 font-semibold"
-                                    : "text-mist-300 hover:bg-ink-800/70 hover:text-mist-50"
-                                }`}
+                                className={`flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs transition-colors ${isCurrent
+                                  ? "bg-brand-500/15 text-mist-50 font-semibold"
+                                  : "text-mist-300 hover:bg-ink-800/70 hover:text-mist-50"
+                                  }`}
                               >
                                 <span className="mt-0.5 shrink-0 text-base">
                                   {isLibrary ? "🤖" : "📘"}
@@ -843,11 +842,10 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
                                       </>
                                     ) : null}
                                     <span
-                                      className={`ml-auto shrink-0 rounded px-1 text-[9px] font-medium ${
-                                        isLibrary
-                                          ? "bg-emerald-500/15 text-emerald-400"
-                                          : "bg-ink-800 text-mist-400"
-                                      }`}
+                                      className={`ml-auto shrink-0 rounded px-1 text-[9px] font-medium ${isLibrary
+                                        ? "bg-emerald-500/15 text-emerald-400"
+                                        : "bg-ink-800 text-mist-400"
+                                        }`}
                                     >
                                       {isLibrary ? "Thư viện" : "Mẫu"}
                                     </span>
@@ -874,10 +872,6 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
                 ) : null}
               </div>
 
-              <span className="chip shrink-0">
-                {lesson.subject}
-                {lesson.grade ? ` · ${lesson.grade}` : ""}
-              </span>
               <div className="shrink-0">
                 <TeacherVoice
                   lesson={lesson}
@@ -914,11 +908,10 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
                   not "broken". */}
               {voiceState.status !== "idle" && voiceState.sceneIndex !== null ? (
                 <span
-                  className={`chip shrink-0 ${
-                    voiceState.status === "preparing"
-                      ? "border-gold-500/60 bg-gold-500/10 text-gold-600"
-                      : "border-brand-500/60 bg-brand-500/10 text-brand-300"
-                  }`}
+                  className={`chip shrink-0 ${voiceState.status === "preparing"
+                    ? "border-gold-500/60 bg-gold-500/10 text-gold-600"
+                    : "border-brand-500/60 bg-brand-500/10 text-brand-300"
+                    }`}
                   title={voiceState.sceneTitle}
                 >
                   {voiceState.status === "preparing" ? (
@@ -1090,9 +1083,8 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
 
         {/* right column: chapter outline and AI tutor */}
         <div
-          className={`min-w-0 flex flex-col gap-3 transition-all duration-300 lg:flex lg:h-full lg:min-h-0 ${
-            outlineExpanded ? "lg:w-[28rem] xl:w-[32rem]" : "lg:w-[23rem] xl:w-[26rem]"
-          }`}
+          className={`min-w-0 flex flex-col gap-3 transition-all duration-300 lg:flex lg:h-full lg:min-h-0 ${outlineExpanded ? "lg:w-[28rem] xl:w-[32rem]" : "lg:w-[23rem] xl:w-[26rem]"
+            }`}
         >
           <ChapterList
             lesson={lesson}

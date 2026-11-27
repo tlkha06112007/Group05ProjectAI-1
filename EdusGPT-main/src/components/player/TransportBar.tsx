@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useRef } from "react";
 import {
@@ -327,8 +327,21 @@ export function TransportBar({
           </button>
         </div>
 
-
+        {/* AI Assistant toggle — shows always; highlighted when open */}
+        {onToggleAi && (
           <button
+            type="button"
+            onClick={onToggleAi}
+            className={`btn-icon ${aiOpen ? "text-brand-300" : "text-mist-400 hover:text-mist-100"}`}
+            title={t.transportAiTutorTitle}
+            aria-label={t.transportAiTutor}
+            aria-pressed={aiOpen}
+          >
+            <Sparkles className="h-4 w-4" />
+          </button>
+        )}
+
+        <button
           type="button"
           onClick={onToggleHelp}
           className="btn-icon"
