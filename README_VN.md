@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo.png" width="120" alt="Logo EdusGPT" />
+  <img src="EdusGPT-main/public/logo.png" width="120" alt="Logo EdusGPT" />
 </p>
 
 <h1 align="center">EdusGPT</h1>
@@ -29,11 +29,11 @@
 Mời bạn theo dõi video giới thiệu chính thức 30 giây khám phá toàn cảnh hệ sinh thái EdusGPT:
 
 <div align="center">
-  <a href="public_html/video/intro.mp4" target="_blank" title="Nhấp để xem Video Full HD 60 FPS có âm thanh">
-    <img src="public_html/assets/intro-preview.gif" alt="EdusGPT Product Tour Preview" width="100%" style="max-width: 880px; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); border: 1px solid #334155;" />
+  <a href="EdusGPT-main/public_html/video/intro.mp4" target="_blank" title="Nhấp để xem Video Full HD 60 FPS có âm thanh">
+    <img src="EdusGPT-main/public_html/assets/intro-preview.gif" alt="EdusGPT Product Tour Preview" width="100%" style="max-width: 880px; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); border: 1px solid #334155;" />
   </a>
   <p align="center">
-    🎬 <b><a href="public_html/video/intro.mp4">▶️ Nhấp vào đây để xem / tải Video Full HD 60 FPS có âm thanh (intro.mp4)</a></b> &nbsp;•&nbsp; 
+    🎬 <b><a href="EdusGPT-main/public_html/video/intro.mp4">▶️ Nhấp vào đây để xem / tải Video Full HD 60 FPS có âm thanh (intro.mp4)</a></b> &nbsp;•&nbsp; 
     🌐 <b><a href="README.html">Mở bản Interactive HTML Guide</a></b>
   </p>
 </div>
@@ -73,10 +73,11 @@ Video giới thiệu được quay và dựng chuẩn **60 FPS** độ phân gi�
 ## 🚀 Hướng dẫn Chạy Nhanh
 
 ### Windows:
-Nhấp đúp vào `run.bat`.
+Nhấp đúp vào `EdusGPT-main/run.bat`.
 
 ### macOS hoặc Linux:
 ```bash
+cd EdusGPT-main
 chmod +x run.sh
 ./run.sh
 ```
@@ -119,12 +120,14 @@ Trước khi khởi chạy thủ công, bạn cần chuẩn bị tệp biến m�
 
 ### Chạy thủ công:
 ```bash
+cd EdusGPT-main
 npm install
 npm run dev          # Truy cập tại http://localhost:3000
 ```
 
 ### Kiểm tra sức khỏe runtime:
 ```powershell
+cd EdusGPT-main
 powershell -ExecutionPolicy Bypass -File scripts/smoke-test.ps1
 ```
 
@@ -140,7 +143,7 @@ Mở trang `/setup` trên trình duyệt. EdusGPT hỗ trợ hai chế độ lin
    - **Token Harbor**: Cổng kết nối đa mô hình.
    - Dán key vào ô tương ứng, bấm **Kiểm tra Key** rồi Lưu. Key được lưu an toàn trong file `.env` (`GROQ_API_KEY`, `NVIDIA_API_KEY`, `TOKENHARBOR_API_KEY`) và giao diện luôn che mờ key.
 2. **AI Cục bộ qua Antigravity CLI (Không tốn tiền API)**:
-   - **Antigravity CLI (`agy`)**: Đọc trực tiếp thư mục tài liệu sách giáo khoa trên máy bạn, tự động học và sinh bài giảng chuyên sâu mà không tốn chi phí gọi API. Xem chi tiết tại `docs/ANTIGRAVITY.md`.
+   - **Antigravity CLI (`agy`)**: Đọc trực tiếp thư mục tài liệu sách giáo khoa trên máy bạn, tự động học và sinh bài giảng chuyên sâu mà không tốn chi phí gọi API. Xem chi tiết tại `EdusGPT-main/docs/ANTIGRAVITY.md`.
 
 ---
 

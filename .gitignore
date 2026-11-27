@@ -1,0 +1,14 @@
+# Environment files (never commit private .env or keys)
+.env
+.env.*
+!.env.example
+
+# Local IDE / tooling scratch
+.cursor/
+
+# Build, runtime & logs if created at root
+node_modules/
+.next/
+.runtime/
+*.log
+.DS_Store
