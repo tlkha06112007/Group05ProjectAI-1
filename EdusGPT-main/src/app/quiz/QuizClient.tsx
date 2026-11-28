@@ -481,15 +481,21 @@ export function QuizClient({ courseId }: QuizClientProps) {
                           letterClass = "border-brand-400 bg-brand-500 text-white font-bold";
                         }
                       } else {
-                        // After submission: highlight correct and wrong
+                        // After submission: keep dark ink on soft tints in light mode and
+                        // bright pastel ink in dark mode so revealed answers stay legible.
                         if (opt.isCorrect) {
-                          stateClass = "border-emerald-500/80 bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-500";
-                          letterClass = "border-emerald-400 bg-emerald-500 text-white font-bold";
+                          stateClass =
+                            "border-emerald-600/80 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-500/70 dark:border-emerald-500/80 dark:bg-emerald-500/20 dark:text-emerald-100 dark:ring-emerald-500";
+                          letterClass =
+                            "border-emerald-600 bg-emerald-600 text-white font-bold dark:border-emerald-400 dark:bg-emerald-500";
                         } else if (isSelected) {
-                          stateClass = "border-rose-500/80 bg-rose-500/20 text-rose-100 ring-1 ring-rose-500";
-                          letterClass = "border-rose-400 bg-rose-500 text-white font-bold";
+                          stateClass =
+                            "border-rose-600/80 bg-rose-50 text-rose-950 ring-1 ring-rose-500/70 dark:border-rose-500/80 dark:bg-rose-500/20 dark:text-rose-100 dark:ring-rose-500";
+                          letterClass =
+                            "border-rose-600 bg-rose-600 text-white font-bold dark:border-rose-400 dark:bg-rose-500";
                         } else {
-                          stateClass = "border-ink-800 bg-ink-950/30 text-mist-500 opacity-60";
+                          stateClass =
+                            "border-ink-800 bg-ink-950/50 text-mist-300 opacity-80 dark:bg-ink-950/30 dark:text-mist-400 dark:opacity-65";
                         }
                       }
 
@@ -511,9 +517,9 @@ export function QuizClient({ courseId }: QuizClientProps) {
                           </span>
                           {submitted ? (
                             opt.isCorrect ? (
-                              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
+                              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5" />
                             ) : isSelected ? (
-                              <XCircle className="h-4 w-4 shrink-0 text-rose-400 mt-0.5" />
+                              <XCircle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
                             ) : null
                           ) : null}
                         </button>
@@ -526,20 +532,20 @@ export function QuizClient({ courseId }: QuizClientProps) {
                     <div
                       className={`mt-4 rounded-xl border p-4 text-xs leading-relaxed ${
                         isUserCorrect
-                          ? "border-emerald-500/40 bg-emerald-500/10 text-mist-100"
-                          : "border-rose-500/40 bg-rose-500/10 text-mist-100"
+                          ? "border-emerald-600/40 bg-emerald-50/80 text-mist-100 dark:border-emerald-500/40 dark:bg-emerald-500/10"
+                          : "border-rose-600/40 bg-rose-50/80 text-mist-100 dark:border-rose-500/40 dark:bg-rose-500/10"
                       }`}
                     >
                       <div className="flex items-center gap-1.5 font-bold">
                         {isUserCorrect ? (
                           <>
-                            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                            <span className="text-emerald-300">{t.correctVerdict}</span>
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                            <span className="text-emerald-800 dark:text-emerald-300">{t.correctVerdict}</span>
                           </>
                         ) : (
                           <>
-                            <XCircle className="h-4 w-4 text-rose-400" />
-                            <span className="text-rose-300">{t.wrongVerdict}</span>
+                            <XCircle className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+                            <span className="text-rose-800 dark:text-rose-300">{t.wrongVerdict}</span>
                           </>
                         )}
                       </div>
@@ -586,14 +592,14 @@ export function QuizClient({ courseId }: QuizClientProps) {
                   if (!submitted) {
                     if (isAnswered) {
                       // Câu nào làm xong thì tô lên!
-                      boxClass = "border-brand-500 bg-brand-500/25 text-brand-200 font-bold shadow-sm";
+                      boxClass = "border-brand-500 bg-brand-500/15 text-brand-700 dark:bg-brand-500/25 dark:text-brand-200 font-bold shadow-sm";
                     }
                   } else {
                     // Sau khi làm xong: đúng thì xanh lá, sai thì tô đỏ
                     if (isCorrect) {
-                      boxClass = "border-emerald-500/80 bg-emerald-500/25 text-emerald-300 font-bold";
+                      boxClass = "border-emerald-600/70 bg-emerald-100/80 text-emerald-900 dark:border-emerald-500/80 dark:bg-emerald-500/25 dark:text-emerald-300 font-bold";
                     } else {
-                      boxClass = "border-rose-500/80 bg-rose-500/25 text-rose-300 font-bold";
+                      boxClass = "border-rose-600/70 bg-rose-100/80 text-rose-900 dark:border-rose-500/80 dark:bg-rose-500/25 dark:text-rose-300 font-bold";
                     }
                   }
 
@@ -703,7 +709,9 @@ export function QuizClient({ courseId }: QuizClientProps) {
                 <span>{t.unansweredCountLabel}</span>
                 <span
                   className={`font-mono font-bold ${
-                    questions.length - answeredCount > 0 ? "text-amber-400" : "text-emerald-400"
+                    questions.length - answeredCount > 0
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-emerald-600 dark:text-emerald-400"
                   }`}
                 >
                   {t.unansweredUnit.replace("{n}", String(questions.length - answeredCount))}
