@@ -1103,7 +1103,9 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
               if (!outlineOpen) setOutlineOpen(true);
             }}
             currentScene={lesson.scenes[activeScene]}
+            lessonId={lesson.id}
             lessonTitle={lesson.title}
+            lessonOutline={lesson.scenes.map((s, i) => `${i + 1}. ${s.title}`)}
           />
         </div>
       </div>

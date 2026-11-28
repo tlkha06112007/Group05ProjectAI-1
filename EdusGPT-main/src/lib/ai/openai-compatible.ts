@@ -1,6 +1,7 @@
 import type { ProviderCredentials } from "./config";
 import {
   PROVIDERS,
+  STEALTH_KEY_COUNT,
   getStealthApiKey,
   rotateStealthApiKey,
   maskKey,
@@ -659,41 +660,50 @@ export async function generateChatJson<T>(
     if (id && !queue.includes(id)) queue.push(id);
   };
   push(options.model?.trim() || creds.model);
-  try {
-    const catalog = await listChatModels(creds);
-    /*
-     * Reserves come from this vendor's own vetted list first, intersected with
-     * the live catalogue.
-     *
-     * Ranking the raw catalogue alone put `deepseek-ai/deepseek-v4.1-flash`
-     * second: "flash" scores well, the account cannot answer it, and every
-     * attempt then burned a full timeout before rotating on. The ids in
-     * `modelChoices` were each verified to answer this API, so they are the ones
-     * worth falling back to.
-     *
-     * The raw catalogue is a last resort, not a top-up. It is also where a speech
-     * model sits: a lesson rotated onto `canopylabs/orpheus-arabic-saudi` and came
-     * back "requires terms acceptance", which is the provider refusing a TTS model
-     * asked to write prose — five scenes of that and the lesson was never saved.
-     * `MODEL_NOISE` keeps most of those out, but a vetted queue is better than a
-     * filtered guess, so the catalogue is only read when nothing vetted exists.
-     */
-    const live = new Set(catalog.map((model) => model.id));
-    const vetted = (PROVIDERS[creds.provider]?.modelChoices ?? []).filter((id) =>
-      live.has(id),
-    );
-    for (const id of vetted) {
+  // Short-budget interactive calls (like classroom chat) skip the extra /models
+  // catalog round-trip and use vetted fallback models directly for fast response.
+  if ((options.totalTimeoutMs ?? 150_000) <= 40_000) {
+    for (const id of PROVIDERS[creds.provider]?.modelChoices ?? []) {
       if (queue.length >= 4) break;
       push(id);
     }
-    if (queue.length === 1) {
-      for (const id of rankChatModels(catalog, 4)) {
+  } else {
+    try {
+      const catalog = await listChatModels(creds);
+      /*
+       * Reserves come from this vendor's own vetted list first, intersected with
+       * the live catalogue.
+       *
+       * Ranking the raw catalogue alone put `deepseek-ai/deepseek-v4.1-flash`
+       * second: "flash" scores well, the account cannot answer it, and every
+       * attempt then burned a full timeout before rotating on. The ids in
+       * `modelChoices` were each verified to answer this API, so they are the ones
+       * worth falling back to.
+       *
+       * The raw catalogue is a last resort, not a top-up. It is also where a speech
+       * model sits: a lesson rotated onto `canopylabs/orpheus-arabic-saudi` and came
+       * back "requires terms acceptance", which is the provider refusing a TTS model
+       * asked to write prose — five scenes of that and the lesson was never saved.
+       * `MODEL_NOISE` keeps most of those out, but a vetted queue is better than a
+       * filtered guess, so the catalogue is only read when nothing vetted exists.
+       */
+      const live = new Set(catalog.map((model) => model.id));
+      const vetted = (PROVIDERS[creds.provider]?.modelChoices ?? []).filter((id) =>
+        live.has(id),
+      );
+      for (const id of vetted) {
         if (queue.length >= 4) break;
         push(id);
       }
+      if (queue.length === 1) {
+        for (const id of rankChatModels(catalog, 4)) {
+          if (queue.length >= 4) break;
+          push(id);
+        }
+      }
+    } catch {
+      /* keep the single candidate */
     }
-  } catch {
-    /* keep the single candidate */
   }
 
   /**
@@ -711,6 +721,7 @@ export async function generateChatJson<T>(
   let queueIndex = 0;
   let transientStreak = 0;
   let throttleStreak = 0;
+  let stealthRotations = 0;
   let refits = 0;
   let lastError: AiError | null = null;
 
@@ -939,19 +950,23 @@ export async function generateChatJson<T>(
 
     // A dead or rate-limited model cannot be fixed by retrying the same id.
     if (isModelUnavailable(message) || isQuotaExhausted(message)) {
-      if (creds.provider === "stealth") {
+      if (creds.provider === "stealth" && stealthRotations + 1 < STEALTH_KEY_COUNT) {
+        stealthRotations += 1;
         const nextKey = rotateStealthApiKey();
         creds.apiKey = nextKey;
-        await debugLog(`STEALTH-ROTATE-KEY new_key=${maskKey(nextKey)}`);
+        await debugLog(
+          `STEALTH-ROTATE-KEY (${stealthRotations}/${STEALTH_KEY_COUNT - 1}) new_key=${maskKey(nextKey)}`,
+        );
         attempt -= 1;
         continue;
       }
       if (queueIndex + 1 < queue.length) {
+        stealthRotations = 0;
         queueIndex += 1;
         continue;
       }
       throw new AiError(
-        `${message}. Đã thử hết model dự trữ. Thử lại sau hoặc đổi model trong /setup.`,
+        `${message}. Đã thử hết ${creds.provider === "stealth" ? "key & " : ""}model dự trữ. Thử lại sau hoặc đổi model trong /setup.`,
         response.status,
       );
     }
