@@ -228,23 +228,33 @@ export function sanitizeBlocks(raw: unknown): SlideBlock[] | undefined {
  * through this one function, so both shapes always coerce identically.
  */
 function coerceQuizOptions(value: unknown, keepCjk = false): QuizOption[] {
-  return Array.isArray(value)
-    ? value.map((opt: Record<string, unknown>, optIdx: number) => {
-        const text = asString(opt.text, `Lựa chọn ${optIdx + 1}`);
-        const isCorrect = Boolean(opt.isCorrect);
-        const rawExplanation = asString(opt.explanation) || undefined;
-        const explanation =
-          keepCjk || !rawExplanation
-            ? rawExplanation
-            : cleanQuizExplanation(rawExplanation, isCorrect, text);
-        return {
-          id: asString(opt.id) || `opt-${optIdx + 1}`,
-          text,
-          isCorrect,
-          explanation,
-        };
-      })
-    : [];
+  if (!Array.isArray(value)) return [];
+  let seenCorrect = false;
+  return value
+    .filter((opt): opt is Record<string, unknown> => Boolean(opt && typeof opt === "object"))
+    .map((opt, optIdx) => {
+      const text = asString(opt.text, `Lựa chọn ${optIdx + 1}`);
+      // Single-choice quizzes expect at most one correct answer; keep the first
+      // if the model accidentally flagged multiple.
+      const rawCorrect = Boolean(opt.isCorrect);
+      const isCorrect = rawCorrect && !seenCorrect;
+      if (isCorrect) seenCorrect = true;
+      const rawExplanation = asString(opt.explanation) || undefined;
+      const explanation =
+        keepCjk || !rawExplanation
+          ? rawExplanation
+          : cleanQuizExplanation(rawExplanation, isCorrect, text);
+      return {
+        id: asString(opt.id) || `opt-${optIdx + 1}`,
+        text,
+        isCorrect,
+        explanation,
+      };
+    });
+}
+
+function isAnswerableQuizOptions(options: QuizOption[]): boolean {
+  return options.length >= 2 && options.some((opt) => opt.isCorrect);
 }
 
 /** Han / Kana / Hangul — the scripts a Vietnamese sentence never borrows. */
@@ -318,15 +328,15 @@ export function coerceLesson(input: unknown): Lesson | null {
             question: asString(entry.question).trim(),
             options: coerceQuizOptions(entry.options, keepCjk),
           }))
-          .filter((entry) => entry.question.length > 0 && entry.options.length >= 2)
+          .filter((entry) => entry.question.length > 0 && isAnswerableQuizOptions(entry.options))
           .slice(0, 30)
       : [];
-    // A quiz with fewer than two options can never be answered: the Check
-    // button stays disabled, and with the gate armed the deck would be
-    // rewound to it forever. A bank-only slide survives — its questions
-    // carry their own options.
-    const quizOptions =
+    // A quiz with fewer than two options or no correct answer can never be
+    // solved cleanly. A bank-only slide survives — its questions carry their
+    // own validated options.
+    const rawQuizOptions =
       quizRaw && typeof quizRaw === "object" ? coerceQuizOptions(quizRaw.options, keepCjk) : [];
+    const quizOptions = isAnswerableQuizOptions(rawQuizOptions) ? rawQuizOptions : [];
     const quiz = quizRaw && typeof quizRaw === "object" && (quizOptions.length >= 2 || questions.length > 0) ? {
       question: asString(quizRaw.question, "Câu hỏi kiểm tra kiến thức:"),
       options: quizOptions,
