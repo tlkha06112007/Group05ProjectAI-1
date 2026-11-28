@@ -163,7 +163,7 @@ export function LessonLoadingModal({
       role="dialog"
       aria-modal="true"
       aria-label={t.loadingTitle}
-      className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-ink-950/85 backdrop-blur-md rounded-2xl animate-in fade-in duration-200 select-none"
+      className="absolute inset-0 z-[60] flex items-start justify-center pt-10 sm:items-center sm:pt-4 p-4 bg-ink-950/95 backdrop-blur-xl rounded-2xl animate-in fade-in duration-200 select-none"
     >
       {/* Background ambient radial glow */}
       <div

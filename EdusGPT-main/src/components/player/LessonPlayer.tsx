@@ -143,7 +143,8 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
   });
   const [activeChapter, setActiveChapter] = useState(0);
   const [exporting, setExporting] = useState(false);
-  const [aiChatOpen, setAiChatOpen] = useState(true);
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [aiChatOpen, setAiChatOpen] = useState(false);
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
   const [outlineExpanded, setOutlineExpanded] = useState(false);
 
@@ -719,20 +720,20 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
   return (
     <>
       {/* Responsive layout: Side-by-side on desktop with matching heights, stacked on mobile/tablet */}
-      <div className="grid min-w-0 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_auto] lg:grid-rows-[minmax(0,1fr)] lg:gap-4 xl:gap-5">
+      <div className="relative grid min-w-0 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_auto] lg:grid-rows-[minmax(0,1fr)] lg:gap-4 xl:gap-5">
+        {/* Loading Popup Overlay: Covers the entire player (stage + sidebar) until assets & voice are loaded */}
+        <LessonLoadingModal
+          lesson={lesson}
+          narration={narration}
+          isOpen={loadingModalOpen}
+          onFinish={() => setLoadingModalOpen(false)}
+          onCancel={() => {
+            tbPause();
+            router.push("/library");
+          }}
+        />
         {/* Left column: Video stage, toolbar, transport controls */}
         <div className="relative flex min-w-0 flex-col space-y-2 lg:min-h-0 lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto">
-          {/* Loading Popup Overlay: Blocks interaction with player until assets & voice are loaded */}
-          <LessonLoadingModal
-            lesson={lesson}
-            narration={narration}
-            isOpen={loadingModalOpen}
-            onFinish={() => setLoadingModalOpen(false)}
-            onCancel={() => {
-              tbPause();
-              router.push("/library");
-            }}
-          />
           {/* toolbar */}
           <div className="panel relative z-30 flex flex-wrap items-center justify-between gap-2.5 p-2.5">
             {/* Left controls: search, subject chip, teacher voice */}
@@ -1063,17 +1064,6 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
               onToggleMute={timebase.toggleMute}
               onFullscreen={toggleFullscreen}
               onToggleHelp={() => setHelpOpen((value) => !value)}
-              onToggleAi={() => {
-                if (!aiChatOpen) {
-                  setAiChatOpen(true);
-                  setOutlineExpanded(false);
-                } else if (outlineExpanded) {
-                  setOutlineExpanded(false);
-                } else {
-                  setAiChatOpen(false);
-                }
-              }}
-              aiOpen={aiChatOpen && !outlineExpanded}
               onPrevScene={onPrevScene}
               onNextScene={onNextScene}
               currentSceneTitle={lesson.scenes[activeScene]?.title}
@@ -1091,17 +1081,29 @@ export function LessonPlayer({ initialLesson, samples, initialMode }: LessonPlay
             timebase={timebase}
             activeScene={activeScene}
             activeChapter={activeChapter}
+            open={outlineOpen}
+            onOpen={() => setOutlineOpen(true)}
+            onClose={() => {
+              setOutlineOpen(false);
+              // Hiding chapters immediately expands the AI tutor into the column
+              // instead of leaving two collapsed bars with empty space.
+              setAiChatOpen(true);
+            }}
+            fullHeight={!aiChatOpen}
             expanded={outlineExpanded}
             onToggleExpand={() => setOutlineExpanded((v) => !v)}
           />
 
           <ClassroomAgentChat
             open={aiChatOpen}
-            onClose={() => setAiChatOpen(false)}
+            fullHeight={!outlineOpen}
+            onOpen={() => setAiChatOpen(true)}
+            onClose={() => {
+              setAiChatOpen(false);
+              if (!outlineOpen) setOutlineOpen(true);
+            }}
             currentScene={lesson.scenes[activeScene]}
             lessonTitle={lesson.title}
-            outlineExpanded={outlineExpanded}
-            onToggleOutlineExpand={() => setOutlineExpanded(false)}
           />
         </div>
       </div>

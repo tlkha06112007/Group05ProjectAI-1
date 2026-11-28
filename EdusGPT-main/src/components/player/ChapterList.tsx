@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import {
+  ChevronDown,
+  ChevronUp,
   ListVideo,
   FileText,
-  Mic,
   Maximize2,
   Minimize2,
   Play,
@@ -18,20 +19,24 @@ import { InlineText } from "./InlineText";
 const COPY = {
   en: {
     chapterOutline: "Lesson chapters",
-    chapterNarration: "Scene narration",
     tabOutline: "Chapters",
     tabTranscript: "Transcript",
-    expandOutline: "Expand (view details)",
-    collapseOutline: "Collapse (open AI tutor)",
+    expandOutline: "Widen sidebar",
+    collapseOutline: "Narrow sidebar",
+    hideOutline: "Hide chapters (expand AI chat)",
+    openOutline: "Open lesson chapters",
+    openOutlineHint: "Click to show chapters & transcript",
     scenesUnit: "scenes",
   },
   vi: {
     chapterOutline: "Mục lục bài giảng",
-    chapterNarration: "Lời giảng cảnh",
     tabOutline: "Mục lục",
     tabTranscript: "Lời giảng",
-    expandOutline: "Phóng to (xem kỹ)",
-    collapseOutline: "Thu nhỏ (mở Trợ giảng AI)",
+    expandOutline: "Mở rộng cột bên",
+    collapseOutline: "Thu gọn cột bên",
+    hideOutline: "Ẩn mục lục (mở rộng khung AI)",
+    openOutline: "Mở mục lục bài giảng",
+    openOutlineHint: "Nhấn để mở mục lục & lời giảng",
     scenesUnit: "cảnh",
   },
 };
@@ -41,58 +46,120 @@ interface ChapterListProps {
   timebase: Timebase;
   activeScene: number;
   activeChapter: number;
+  open?: boolean;
+  onOpen?: () => void;
+  onClose?: () => void;
+  fullHeight?: boolean;
   expanded?: boolean;
   onToggleExpand?: () => void;
 }
 
-/** Clickable YouTube-style outline: chapter → scene with expand/collapse and transcript. */
+/** Clickable YouTube-style outline: chapter → scene with collapse/expand and transcript. */
 export function ChapterList({
   lesson,
   timebase,
   activeScene,
   activeChapter,
+  open = true,
+  onOpen,
+  onClose,
+  fullHeight = false,
   expanded = false,
   onToggleExpand,
 }: ChapterListProps) {
   const t = useCopy(COPY);
   const lang = useLang();
   const [activeTab, setActiveTab] = useState<"outline" | "transcript">("outline");
-  const activeNarration = lesson.scenes[activeScene]?.narration;
 
+  // Single persistent panel container with synchronized CSS `height` calc()
+  // values on desktop (lg:) and `max-height` on mobile so toggling either panel
+  // glides the split line smoothly without ever snapping `max-height: none`.
   return (
     <div
-      className={`panel flex flex-col overflow-hidden transition-all duration-300 ${
-        expanded
-          ? "w-full ring-1 ring-brand-500/30 flex-1 min-h-0"
-          : "w-full max-h-[14rem] sm:max-h-[16rem] lg:max-h-[18rem] shrink-0"
-      }`}
+      className={`panel relative flex flex-col overflow-hidden transition-[height,max-height,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:flex-none lg:max-h-none lg:min-h-[3.5rem] ${
+        open
+          ? fullHeight
+            ? "w-full max-h-[34rem] lg:h-[calc(100%-4.25rem)]"
+            : "w-full max-h-[18rem] lg:h-[calc(42%-0.375rem)]"
+          : "w-full max-h-[3.5rem] min-h-[3.5rem] lg:h-[3.5rem]"
+      } ${open && expanded ? "ring-1 ring-brand-500/30" : ""}`}
     >
-      {/* Header: Title, duration, tabs, and expand/collapse toggle */}
+      <button
+        type="button"
+        onClick={onOpen}
+        tabIndex={open ? -1 : 0}
+        aria-hidden={open}
+        aria-label={t.openOutline}
+        aria-expanded={open}
+        className={`group absolute inset-x-0 top-0 z-10 flex h-[3.375rem] w-full items-center gap-3 px-4 text-left transition-opacity duration-200 hover:bg-ink-850/40 ${
+          open ? "pointer-events-none opacity-0" : "opacity-100 delay-100"
+        }`}
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 transition-colors group-hover:bg-amber-500/25">
+          <ListVideo className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-mist-100">
+            <span className="truncate">{t.chapterOutline}</span>
+            <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] font-normal normal-case text-mist-400">
+              {lesson.scenes.length} {t.scenesUnit}
+            </span>
+          </span>
+          <span className="block truncate text-[11px] text-mist-400 group-hover:text-mist-200 transition-colors">
+            {t.openOutlineHint}
+          </span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-mist-400 group-hover:text-mist-200 transition-colors" />
+      </button>
+
+      <div
+        inert={!open || undefined}
+        aria-hidden={!open}
+        className={`flex min-h-0 flex-1 flex-col transition-[opacity,transform] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          open
+            ? "duration-300 delay-75 translate-y-0 opacity-100"
+            : "duration-150 -translate-y-2 pointer-events-none opacity-0"
+        }`}
+      >
+        {/* Header: Title, duration, tabs, and expand/hide toggles */}
       <div className="shrink-0 flex flex-col gap-2 border-b border-ink-700/70 bg-ink-950/60 p-3 sm:px-4">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <ListVideo className="h-4 w-4 text-amber-500 dark:text-amber-400" />
-            <h3 className="text-sm font-bold text-mist-100">{t.chapterOutline}</h3>
-            <span className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] text-mist-400">
+          <div className="flex min-w-0 items-center gap-2">
+            <ListVideo className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
+            <h3 className="truncate text-sm font-bold text-mist-100">{t.chapterOutline}</h3>
+            <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] text-mist-400">
               {lesson.scenes.length} {t.scenesUnit} · {formatClock(lesson.duration, false)}
             </span>
           </div>
 
-          {onToggleExpand && (
-            <button
-              type="button"
-              onClick={onToggleExpand}
-              className="btn-icon h-7 w-7 rounded-md text-mist-300 hover:text-mist-50"
-              title={expanded ? t.collapseOutline : t.expandOutline}
-              aria-label={expanded ? t.collapseOutline : t.expandOutline}
-            >
-              {expanded ? (
-                <Minimize2 className="h-3.5 w-3.5" />
-              ) : (
-                <Maximize2 className="h-3.5 w-3.5" />
-              )}
-            </button>
-          )}
+          <div className="flex shrink-0 items-center gap-1">
+            {onToggleExpand && (
+              <button
+                type="button"
+                onClick={onToggleExpand}
+                className="btn-icon h-7 w-7 rounded-md text-mist-300 hover:text-mist-50"
+                title={expanded ? t.collapseOutline : t.expandOutline}
+                aria-label={expanded ? t.collapseOutline : t.expandOutline}
+              >
+                {expanded ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="btn-icon h-7 w-7 rounded-md text-mist-300 hover:text-mist-50"
+                title={t.hideOutline}
+                aria-label={t.hideOutline}
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Tab switch: Chapters vs Full Transcript */}
@@ -263,22 +330,7 @@ export function ChapterList({
           </div>
         )}
       </div>
-
-      {/* Active scene narration quote at bottom of outline */}
-      {activeNarration && activeTab === "outline" ? (
-        <div className="shrink-0 border-t border-ink-700/70 bg-ink-950/70 p-3">
-          <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-mist-400">
-            <Mic className="h-3 w-3 text-amber-500 dark:text-amber-400" />
-            {t.chapterNarration} #{activeScene + 1}
-          </p>
-          <p
-            className="mt-1 line-clamp-3 text-xs italic leading-relaxed text-mist-200"
-            title={activeNarration}
-          >
-            <InlineText text={activeNarration} />
-          </p>
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
