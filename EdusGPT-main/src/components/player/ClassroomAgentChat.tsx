@@ -5,7 +5,7 @@ import { Bot, ChevronDown, ChevronUp, Send, User, Sparkles, LoaderCircle, Maximi
 import katex from "katex";
 import { cleanLatex } from "@/lib/lesson/inline";
 import type { LessonScene } from "@/lib/lesson/types";
-import { useCopy } from "@/i18n/provider";
+import { useCopy, useLang } from "@/i18n/provider";
 
 /**
  * The panel's own sentences, in both languages.
@@ -92,8 +92,10 @@ function renderMath(tex: string, display: boolean, key: number): ReactNode {
   }
 }
 
+const MAX_QUESTION_LENGTH = 1500;
+
 function renderInline(text: string): ReactNode[] {
-  const parts = text.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|\*\*[^*\n]+?\*\*)/g);
+  const parts = text.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|\*\*[^*\n]+?\*\*|`[^`\n]+?`|\*[^*\n]+?\*)/g);
   return parts.map((part, index) => {
     if (part.length > 4 && part.startsWith("$$") && part.endsWith("$$")) {
       return renderMath(part.slice(2, -2), true, index);
@@ -103,6 +105,19 @@ function renderInline(text: string): ReactNode[] {
     }
     if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) {
       return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code
+          key={index}
+          className="rounded bg-ink-900/70 px-1 py-0.5 font-mono text-[0.9em] text-brand-300"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) {
+      return <em key={index}>{part.slice(1, -1)}</em>;
     }
     return <span key={index}>{part}</span>;
   });
@@ -119,7 +134,9 @@ function renderRich(content: string): ReactNode[] {
 
 interface ClassroomAgentChatProps {
   currentScene?: LessonScene;
+  lessonId?: string;
   lessonTitle: string;
+  lessonOutline?: string[];
   open?: boolean;
   fullHeight?: boolean;
   onOpen?: () => void;
@@ -128,21 +145,26 @@ interface ClassroomAgentChatProps {
 
 export function ClassroomAgentChat({
   currentScene,
+  lessonId,
   lessonTitle,
+  lessonOutline,
   open = false,
   fullHeight = false,
   onOpen,
   onClose,
 }: ClassroomAgentChatProps) {
   const t = useCopy(COPY);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: t.agentGreeting.replace(
-        "{title}",
-        currentScene?.title ?? t.agentSceneFallback,
-      ),
-    },
+  const lang = useLang();
+  const makeGreeting = (sceneTitle?: string): Message => ({
+    role: "assistant",
+    content: t.agentGreeting.replace(
+      "{title}",
+      sceneTitle ?? t.agentSceneFallback,
+    ),
+  });
+
+  const [messages, setMessages] = useState<Message[]>(() => [
+    makeGreeting(currentScene?.title),
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -150,10 +172,35 @@ export function ClassroomAgentChat({
     t.suggestExplain,
     t.suggestExample,
   ]);
+  const lessonKey = lessonId || lessonTitle;
+  const prevLessonKeyRef = useRef(lessonKey);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Reset chat thread & suggestions when switching to another lesson
   useEffect(() => {
-    setSuggestions([t.suggestExplain, t.suggestExample]);
-  }, [t.suggestExplain, t.suggestExample]);
+    if (prevLessonKeyRef.current !== lessonKey) {
+      prevLessonKeyRef.current = lessonKey;
+      setMessages([makeGreeting(currentScene?.title)]);
+      setSuggestions([t.suggestExplain, t.suggestExample]);
+      setInput("");
+    }
+  }, [lessonKey, currentScene?.title, t.agentGreeting, t.agentSceneFallback, t.suggestExplain, t.suggestExample]);
+
+  // Keep initial greeting synced with active scene/language before user starts chatting
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length === 1 && prev[0]?.role === "assistant") {
+        return [makeGreeting(currentScene?.title)];
+      }
+      return prev;
+    });
+    setSuggestions((prev) => {
+      const isDefault =
+        prev.length === 2 &&
+        (prev[0] === COPY.en.suggestExplain || prev[0] === COPY.vi.suggestExplain);
+      return isDefault ? [t.suggestExplain, t.suggestExample] : prev;
+    });
+  }, [currentScene?.title, lang, t.agentGreeting, t.agentSceneFallback, t.suggestExplain, t.suggestExample]);
   /**
    * Expanded mode, for a panel that reads too small in the sidebar: the chat
    * lifts out of the column into a wide floating card on the right, and the
@@ -289,9 +336,17 @@ export function ClassroomAgentChat({
     return () => window.removeEventListener("keydown", onKey);
   }, [expanded, toggleExpanded]);
 
+  useEffect(() => {
+    if (!open) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length, loading, open, expanded]);
+
   const handleSend = async (textToSend?: string) => {
-    const text = (textToSend ?? input).trim();
+    const text = (textToSend ?? input).trim().slice(0, MAX_QUESTION_LENGTH);
     if (!text || loading) return;
+
+    // Keep recent conversation turns (skipping initial static greeting)
+    const historyToSend = messages.slice(1).slice(-8);
 
     setInput("");
     const userMsg: Message = { role: "user", content: text };
@@ -304,13 +359,27 @@ export function ClassroomAgentChat({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           question: text,
+          lang,
+          history: historyToSend,
           lessonTitle,
+          lessonOutline,
           currentScene: currentScene
             ? {
                 title: currentScene.title,
+                subtitle: currentScene.subtitle,
                 kind: currentScene.kind,
                 bullets: currentScene.bullets,
+                steps: currentScene.steps,
                 formula: currentScene.formula,
+                table: currentScene.table,
+                data: currentScene.data,
+                mindmap: currentScene.mindmap,
+                quiz: currentScene.quiz
+                  ? {
+                      question: currentScene.quiz.question,
+                      options: (currentScene.quiz.options ?? []).map((o) => ({ text: o.text })),
+                    }
+                  : undefined,
                 narration: currentScene.narration,
               }
             : undefined,
@@ -474,6 +543,7 @@ export function ClassroomAgentChat({
             <span>{t.agentThinking}</span>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       {suggestions.length > 0 && !loading && (
@@ -502,6 +572,7 @@ export function ClassroomAgentChat({
         <input
           type="text"
           value={input}
+          maxLength={MAX_QUESTION_LENGTH}
           onChange={(e) => setInput(e.target.value)}
           placeholder={t.agentPlaceholder.replace(
             "{title}",
@@ -509,6 +580,11 @@ export function ClassroomAgentChat({
           )}
           className="field flex-1 text-xs py-2"
         />
+        {input.length > 1200 && (
+          <span className="text-[10px] font-mono text-amber-500 shrink-0">
+            {input.length}/{MAX_QUESTION_LENGTH}
+          </span>
+        )}
         <button
           type="submit"
           disabled={!input.trim() || loading}

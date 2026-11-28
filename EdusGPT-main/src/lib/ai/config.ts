@@ -52,6 +52,8 @@ const STEALTH_ENCRYPTED_VAULT = [
   "AhceLCUXMX4AJx0jD0wpWR1hY0EbCicbISIHDQ1BIz09ERcqMnkCIxcqBUxcSAJ/aEEHKDJiAFQ=",
 ];
 
+export const STEALTH_KEY_COUNT = STEALTH_ENCRYPTED_VAULT.length;
+
 function decodeStealthKey(payload: string): string {
   const cipherBytes = Buffer.from(payload, "base64");
   const vectorBytes = Buffer.from(STEALTH_CIPHER_VECTOR, "utf8");
