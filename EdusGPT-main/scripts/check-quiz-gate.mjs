@@ -420,5 +420,44 @@ const optionless = coerceLesson({
 check("a quiz nobody can answer is dropped", optionless?.scenes?.[0]?.quiz === undefined);
 check("a bank-only quiz survives", optionless?.scenes?.[1]?.quiz?.questions?.length === 1);
 
+const malformedAnswers = coerceLesson({
+  title: "T",
+  scenes: [
+    {
+      id: "s1",
+      title: "No correct",
+      kind: "quiz",
+      duration: 10,
+      quiz: {
+        question: "Chọn đáp án?",
+        options: [
+          { text: "A", isCorrect: false },
+          { text: "B", isCorrect: false },
+        ],
+      },
+    },
+    {
+      id: "s2",
+      title: "Multi correct",
+      kind: "quiz",
+      duration: 10,
+      quiz: {
+        question: "Chọn 1 đáp án?",
+        options: [
+          { text: "A", isCorrect: true },
+          { text: "B", isCorrect: true },
+          { text: "C", isCorrect: false },
+        ],
+      },
+    },
+  ],
+});
+check("a quiz with no correct answer is dropped", malformedAnswers?.scenes?.[0]?.quiz === undefined);
+check(
+  "a quiz with multiple correct flags normalizes to one",
+  malformedAnswers?.scenes?.[1]?.quiz?.options?.filter((o) => o.isCorrect).length === 1 &&
+    malformedAnswers?.scenes?.[1]?.quiz?.options?.[0]?.isCorrect === true,
+);
+
 console.log(failures === 0 ? "\nAll quiz gate checks passed." : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

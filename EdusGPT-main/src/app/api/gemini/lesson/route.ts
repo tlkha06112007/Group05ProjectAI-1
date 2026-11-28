@@ -654,12 +654,39 @@ function bankPrompt(
   finalTarget: number,
   checkpointSize: number = 3,
 ): string {
+  const compact = scenes.length > 20;
+  const maxBullets = compact ? 2 : 3;
+  const maxLen = compact ? 80 : 120;
+
   const outline = scenes
     .map((scene, index) => {
       const kind = typeof scene.kind === "string" ? scene.kind : "concept";
       const title = typeof scene.title === "string" ? scene.title : "";
       const subtitle = typeof scene.subtitle === "string" ? scene.subtitle : "";
-      return `${index + 1}. [${kind}] ${title}${subtitle ? ` — ${subtitle}` : ""}`;
+      const details: string[] = [];
+
+      if (kind !== "quiz" && kind !== "diagram") {
+        if (Array.isArray(scene.bullets) && scene.bullets.length > 0) {
+          const bullets = scene.bullets
+            .filter((b): b is string => typeof b === "string" && b.trim().length > 0)
+            .slice(0, maxBullets)
+            .map((b) => b.trim().slice(0, maxLen));
+          if (bullets.length > 0) details.push(`Ý chính: ${bullets.join("; ")}`);
+        }
+        if (typeof scene.formula === "string" && scene.formula.trim()) {
+          details.push(`Công thức: ${scene.formula.trim().slice(0, maxLen)}`);
+        }
+        if (!compact && Array.isArray(scene.steps) && scene.steps.length > 0) {
+          const steps = scene.steps
+            .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+            .slice(0, 3)
+            .map((s) => s.trim().slice(0, 100));
+          if (steps.length > 0) details.push(`Các bước: ${steps.join(" → ")}`);
+        }
+      }
+
+      const head = `${index + 1}. [${kind}] ${title}${subtitle ? ` — ${subtitle}` : ""}`;
+      return details.length > 0 ? `${head}\n   ${details.join(" | ")}` : head;
     })
     .join("\n");
   const checkpointRules =
@@ -1937,6 +1964,8 @@ Chỉ trả về tiêu đề và mục tiêu từng cảnh, chưa viết nội d
         const checkpointCount = Math.max(0, quizScenes.length - 1);
         const finalTarget = quizPlan.enabled ? quizPlan.finalTarget : 0;
         const checkpointSize = quizPlan.questionsPerCheckpoint;
+        let actualFinalTarget = finalTarget;
+        let actualCheckpointSize = checkpointSize;
         const questionTotal = checkpointCount * checkpointSize + finalTarget;
         let bankPlan: { questions: QuizQuestion[]; branches: MindmapBranch[] } | null = null;
         if (quizScenes.length > 0 && quizPlan.enabled) {
@@ -1963,8 +1992,60 @@ Chỉ trả về tiêu đề và mục tiêu từng cảnh, chưa viết nội d
               questions: Array.isArray(bank.data.questions) ? bank.data.questions : [],
               branches: Array.isArray(bank.data.branches) ? bank.data.branches : [],
             };
-          } catch {
-            bankPlan = null;
+          } catch (firstBankErr) {
+            console.warn(
+              `[quiz-bank] Stage 3 failed (${firstBankErr instanceof Error ? firstBankErr.message : String(firstBankErr)}). Trying compact fallback…`,
+            );
+            const fallbackFinal = Math.min(finalTarget, 6);
+            const fallbackCheckpointSize = checkpointCount > 0 ? Math.min(checkpointSize, 2) : 0;
+            const fallbackTotal = checkpointCount * fallbackCheckpointSize + fallbackFinal;
+            if (questionTotal > 6) {
+              send({
+                type: "stage",
+                stage: "quiz",
+                message: `Đang thử lại sinh bộ ${fallbackTotal} câu hỏi rút gọn…`,
+                progress: 96,
+              });
+              try {
+                const retryBank = await generateJson<{
+                  questions: QuizQuestion[];
+                  branches: MindmapBranch[];
+                }>(creds, {
+                  model: modelOverride,
+                  system: BANK_SYSTEM,
+                  prompt: bankPrompt(shortContext, scenes, checkpointCount, fallbackFinal, fallbackCheckpointSize),
+                  schema: bankSchema,
+                  temperature: 0.5,
+                  maxOutputTokens: Math.min(8_192, 1800 + fallbackTotal * 220),
+                  totalTimeoutMs: 90_000,
+                });
+                actualFinalTarget = fallbackFinal;
+                actualCheckpointSize = fallbackCheckpointSize;
+                bankPlan = {
+                  questions: Array.isArray(retryBank.data.questions) ? retryBank.data.questions : [],
+                  branches: Array.isArray(retryBank.data.branches) ? retryBank.data.branches : [],
+                };
+              } catch (retryErr) {
+                console.warn(
+                  `[quiz-bank] Stage 3 compact fallback failed (${retryErr instanceof Error ? retryErr.message : String(retryErr)}). Keeping Stage 2 fallback quiz.`,
+                );
+                send({
+                  type: "stage",
+                  stage: "quiz",
+                  message: "Không thể sinh đầy đủ ngân hàng câu hỏi — giữ lại câu hỏi dự phòng của từng cảnh.",
+                  progress: 96,
+                });
+                bankPlan = null;
+              }
+            } else {
+              send({
+                type: "stage",
+                stage: "quiz",
+                message: "Không thể sinh đầy đủ ngân hàng câu hỏi — giữ lại câu hỏi dự phòng của từng cảnh.",
+                progress: 96,
+              });
+              bankPlan = null;
+            }
           }
         }
 
@@ -1990,21 +2071,41 @@ Chỉ trả về tiêu đề và mục tiêu từng cảnh, chưa viết nội d
         const plan = bankPlan;
         if (plan && quizPlan.enabled) {
           const checkpointSlots = quizScenes.slice(0, -1);
-          // Sanitize every question's options so no Chinese/Han script leaks into explanations
-          const sanitizedQuestions = plan.questions.map((q) => ({
-            ...q,
-            options: q.options.map((opt) => ({
-              ...opt,
-              explanation: cleanQuizExplanation(opt.explanation, opt.isCorrect, opt.text),
-            })),
-          }));
+          // Sanitize every question's options so no Chinese/Han script or broken
+          // answer key passes through into the deck.
+          const sanitizedQuestions = plan.questions
+            .filter(
+              (q) =>
+                q &&
+                typeof q.question === "string" &&
+                q.question.trim().length > 0 &&
+                Array.isArray(q.options) &&
+                q.options.length >= 2 &&
+                q.options.some((opt) => Boolean(opt?.isCorrect)),
+            )
+            .map((q) => {
+              let seenCorrect = false;
+              return {
+                ...q,
+                question: q.question.trim(),
+                options: q.options.map((opt) => {
+                  const isCorrect = Boolean(opt.isCorrect) && !seenCorrect;
+                  if (isCorrect) seenCorrect = true;
+                  return {
+                    ...opt,
+                    isCorrect,
+                    explanation: cleanQuizExplanation(opt.explanation, isCorrect, opt.text),
+                  };
+                }),
+              };
+            });
           // The model put every correct answer first in a real run (18/18) —
           // a bank anyone beats by always pressing A. Rotate before the split;
           // the rotation index follows the flat list's order.
           const { checkpoints, final } = splitBankQuestions(
             spreadCorrectAnswers(sanitizedQuestions),
-            checkpointSlots.map(() => checkpointSize),
-            finalTarget,
+            checkpointSlots.map(() => actualCheckpointSize),
+            actualFinalTarget,
           );
           checkpointSlots.forEach((scene, index) => {
             const bank = checkpoints[index] ?? [];
