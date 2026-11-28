@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Bot, ChevronDown, ChevronUp, Send, User, Sparkles, LoaderCircle, Maximize2, Minimize2, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Bot, ChevronDown, ChevronUp, Send, User, Sparkles, LoaderCircle, Maximize2, Minimize2 } from "lucide-react";
 import katex from "katex";
 import { cleanLatex } from "@/lib/lesson/inline";
 import type { LessonScene } from "@/lib/lesson/types";
@@ -30,6 +30,7 @@ const COPY = {
     agentExpand: "Expand the tutor",
     agentCollapse: "Collapse the tutor",
     agentOpen: "Open the AI tutor",
+    agentOpenHint: "Click to open AI tutor chat",
     agentHide: "Hide the AI tutor",
     suggestExplain: "Explain this part more simply",
     suggestExample: "Give me a real-world example",
@@ -50,6 +51,7 @@ const COPY = {
     agentExpand: "Phóng to khung trợ giảng",
     agentCollapse: "Thu nhỏ khung trợ giảng",
     agentOpen: "Mở khung trợ giảng AI",
+    agentOpenHint: "Nhấn để mở khung trò chuyện với AI",
     agentHide: "Ẩn khung trợ giảng",
     suggestExplain: "Giải thích dễ hiểu hơn về phần này",
     suggestExample: "Cho mình 1 ví dụ thực tế liên quan",
@@ -119,18 +121,18 @@ interface ClassroomAgentChatProps {
   currentScene?: LessonScene;
   lessonTitle: string;
   open?: boolean;
+  fullHeight?: boolean;
+  onOpen?: () => void;
   onClose?: () => void;
-  outlineExpanded?: boolean;
-  onToggleOutlineExpand?: () => void;
 }
 
 export function ClassroomAgentChat({
   currentScene,
   lessonTitle,
-  open = true,
+  open = false,
+  fullHeight = false,
+  onOpen,
   onClose,
-  outlineExpanded = false,
-  onToggleOutlineExpand,
 }: ClassroomAgentChatProps) {
   const t = useCopy(COPY);
   const [messages, setMessages] = useState<Message[]>([
@@ -159,15 +161,111 @@ export function ClassroomAgentChat({
    * the input survive the round trip.
    */
   const [expanded, setExpanded] = useState(false);
-  /**
-   * The panel starts folded into a title bar. In the lesson player the rail
-   * belongs to the outline; the tutor is a "when you need it" tool, and a
-   * permanently open conversation box beside the outline reads as two
-   * competing panels. Opening is one click, and nothing unmounts — the
-   * thread and the input survive every fold.
-   */
-  const [collapsed, setCollapsed] = useState(false);
+  const [animatingDock, setAnimatingDock] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const expandAnimRef = useRef<Animation | null>(null);
+
+  // Cancel the forwards-filled dock animation only after React commits the
+  // docked layout (`expanded === false`), avoiding a 1-frame snap back to full size.
+  useLayoutEffect(() => {
+    if (!expanded && expandAnimRef.current) {
+      expandAnimRef.current.cancel();
+      expandAnimRef.current = null;
+    }
+  }, [expanded]);
+
+  useEffect(() => {
+    return () => {
+      expandAnimRef.current?.cancel();
+      expandAnimRef.current = null;
+    };
+  }, []);
+
+  const toggleExpanded = useCallback(() => {
+    const el = panelRef.current;
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (!expanded) {
+      expandAnimRef.current?.cancel();
+      expandAnimRef.current = null;
+      setAnimatingDock(false);
+      setExpanded(true);
+      return;
+    }
+
+    if (!el || reduced || animatingDock) {
+      expandAnimRef.current?.cancel();
+      expandAnimRef.current = null;
+      setAnimatingDock(false);
+      setExpanded(false);
+      return;
+    }
+
+    const cur = el.getBoundingClientRect();
+    const parent = el.parentElement;
+    const prev = el.previousElementSibling;
+    const isDesktop = window.innerWidth >= 1024;
+
+    if (isDesktop && parent) {
+      const parentRect = parent.getBoundingClientRect();
+      const gap = parseFloat(getComputedStyle(parent).rowGap) || 12;
+      const targetTop = prev ? prev.getBoundingClientRect().bottom + gap : parentRect.top;
+      const targetHeight = Math.max(56, parentRect.bottom - targetTop);
+      const targetRight = window.innerWidth - parentRect.right;
+
+      setAnimatingDock(true);
+      const anim = el.animate(
+        [
+          {
+            top: `${cur.top}px`,
+            right: `${window.innerWidth - cur.right}px`,
+            bottom: "auto",
+            width: `${cur.width}px`,
+            height: `${cur.height}px`,
+          },
+          {
+            top: `${targetTop}px`,
+            right: `${targetRight}px`,
+            bottom: "auto",
+            width: `${parentRect.width}px`,
+            height: `${targetHeight}px`,
+          },
+        ],
+        {
+          duration: 260,
+          easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+          fill: "forwards",
+        },
+      );
+      expandAnimRef.current = anim;
+      anim.onfinish = () => {
+        if (expandAnimRef.current === anim) {
+          setAnimatingDock(false);
+          setExpanded(false);
+        }
+      };
+      return;
+    }
+
+    setAnimatingDock(true);
+    const anim = el.animate(
+      [
+        { opacity: 1, transform: "translate3d(0, 0, 0) scale(1)" },
+        { opacity: 0, transform: "translate3d(12px, 0, 0) scale(0.98)" },
+      ],
+      { duration: 180, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "forwards" },
+    );
+    expandAnimRef.current = anim;
+    anim.onfinish = () => {
+      if (expandAnimRef.current === anim) {
+        setAnimatingDock(false);
+        setExpanded(false);
+      }
+    };
+  }, [expanded, animatingDock]);
+
   /**
    * Opening the panel scrolls it into view. The rail is one scroller and the
    * outline can be long, so without this the button sits at the rail's bottom
@@ -175,18 +273,21 @@ export function ClassroomAgentChat({
    * to do nothing. `nearest` moves the least amount that shows the panel.
    */
   useEffect(() => {
-    if (collapsed || expanded) return;
-    panelRef.current?.scrollIntoView({ block: "nearest" });
-  }, [collapsed, expanded]);
+    if (!open || expanded) return;
+    const timer = window.setTimeout(() => {
+      panelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 320);
+    return () => window.clearTimeout(timer);
+  }, [open, expanded]);
 
   useEffect(() => {
     if (!expanded) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExpanded(false);
+      if (event.key === "Escape") toggleExpanded();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [expanded]);
+  }, [expanded, toggleExpanded]);
 
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend ?? input).trim();
@@ -242,64 +343,64 @@ export function ClassroomAgentChat({
     }
   };
 
-  if (!open) {
-    return null;
-  }
-
-  // Folded: a title bar that opens the panel, or when outline is expanded
-  if ((collapsed || outlineExpanded) && !expanded) {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          setCollapsed(false);
-          onToggleOutlineExpand?.();
-        }}
-        className="panel flex shrink-0 w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:border-brand-500/70"
-        aria-label={t.agentOpen}
-        aria-expanded={false}
-      >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500/20 text-brand-300">
-          <Bot className="h-4 w-4" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-xs font-bold uppercase tracking-wider text-mist-100">
-            {t.agentTitle}
-          </span>
-          <span className="block truncate text-[10px] text-amber-700 dark:text-amber-400 font-medium">
-            {outlineExpanded ? (t.agentOpen || "Nhấn để mở trợ giảng AI hỏi bài") : t.agentSubtitle}
-          </span>
-        </span>
-        <div className="flex items-center gap-1">
-          <ChevronDown className="h-4 w-4 shrink-0 text-mist-400" />
-          {onClose && (
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-              className="p-1 text-mist-400 hover:text-mist-200"
-              title={t.agentHide}
-            >
-              <X className="h-3.5 w-3.5" />
-            </span>
-          )}
-        </div>
-      </button>
-    );
-  }
-
+  // Persistent container with synchronized `height` calc() on desktop (lg:)
+  // and `max-height` on mobile so expanding/collapsing glides smoothly with
+  // the outline above it without leaving empty gaps or snapping.
   return (
     <div
       ref={panelRef}
       className={
         expanded
-          ? "panel fixed inset-y-3 right-3 z-[70] flex w-[min(36rem,94vw)] flex-col overflow-hidden shadow-2xl"
-          : "panel flex flex-col overflow-hidden flex-1 min-h-[16rem] lg:min-h-0"
+          ? `panel fixed inset-y-3 right-3 z-[70] flex w-[min(36rem,94vw)] flex-col overflow-hidden shadow-2xl ${
+              animatingDock ? "" : "animate-chat-pop"
+            }`
+          : `panel relative flex flex-col overflow-hidden transition-[height,max-height] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:flex-none lg:max-h-none lg:min-h-[3.5rem] ${
+              open
+                ? fullHeight
+                  ? "w-full max-h-[30rem] lg:h-[calc(100%-4.25rem)]"
+                  : "w-full max-h-[28rem] lg:h-[calc(58%-0.375rem)]"
+                : "w-full max-h-[3.5rem] min-h-[3.5rem] lg:h-[3.5rem]"
+            }`
       }
     >
+      {!expanded && (
+        <button
+          type="button"
+          onClick={onOpen}
+          tabIndex={open ? -1 : 0}
+          aria-hidden={open}
+          aria-label={t.agentOpen}
+          aria-expanded={open}
+          className={`group absolute inset-x-0 bottom-0 z-10 flex h-[3.375rem] w-full items-center gap-3 px-4 text-left transition-opacity duration-200 hover:bg-ink-850/40 ${
+            open ? "pointer-events-none opacity-0" : "opacity-100 delay-100"
+          }`}
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-500/15 text-brand-400 transition-colors group-hover:bg-brand-500/25">
+            <Bot className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-bold uppercase tracking-wider text-mist-100">
+              {t.agentTitle}
+            </span>
+            <span className="block truncate text-[11px] text-mist-400 transition-colors group-hover:text-mist-200">
+              {t.agentOpenHint}
+            </span>
+          </span>
+          <ChevronUp className="h-4 w-4 shrink-0 text-mist-400 transition-colors group-hover:text-mist-200" />
+        </button>
+      )}
+
+      <div
+        inert={!open || undefined}
+        aria-hidden={!open}
+        className={`flex min-h-0 flex-1 flex-col transition-[opacity,transform] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          expanded ? "h-full" : "h-[24rem] lg:h-full"
+        } ${
+          open
+            ? "duration-300 delay-75 translate-y-0 opacity-100"
+            : "duration-150 translate-y-2 pointer-events-none opacity-0"
+        }`}
+      >
       <div className="flex items-center justify-between border-b border-ink-700/70 bg-ink-950/70 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/20 text-brand-300">
@@ -315,30 +416,31 @@ export function ClassroomAgentChat({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => {
-              if (onClose) {
-                onClose();
-              } else {
-                setCollapsed(true);
-                setExpanded(false);
-              }
-            }}
-            className="btn-icon"
-            title={t.agentHide}
-            aria-label={t.agentHide}
-          >
-            <X className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            className="btn-icon"
+            onClick={toggleExpanded}
+            className="btn-icon h-7 w-7 rounded-md text-mist-300 hover:text-mist-50"
             title={expanded ? t.agentCollapse : t.agentExpand}
             aria-label={expanded ? t.agentCollapse : t.agentExpand}
             aria-pressed={expanded}
           >
-            {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={() => {
+                expandAnimRef.current?.cancel();
+                expandAnimRef.current = null;
+                setAnimatingDock(false);
+                setExpanded(false);
+                onClose();
+              }}
+              className="btn-icon h-7 w-7 rounded-md text-mist-300 hover:text-mist-50"
+              title={t.agentHide}
+              aria-label={t.agentHide}
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -415,6 +517,7 @@ export function ClassroomAgentChat({
           <Send className="h-4 w-4" />
         </button>
       </form>
+      </div>
     </div>
   );
 }

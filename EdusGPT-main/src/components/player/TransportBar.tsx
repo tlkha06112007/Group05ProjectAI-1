@@ -14,7 +14,6 @@ import {
   Rewind,
   SkipBack,
   SkipForward,
-  Sparkles,
   Volume1,
   Volume2,
   VolumeX,
@@ -34,8 +33,6 @@ interface TransportBarProps {
   onToggleMute: () => void;
   onFullscreen: () => void;
   onToggleHelp: () => void;
-  onToggleAi?: () => void;
-  aiOpen?: boolean;
   onPrevScene?: () => void;
   onNextScene?: () => void;
   currentSceneTitle?: string;
@@ -65,8 +62,6 @@ const COPY = {
     transportPrevSceneTitle: "Previous scene (P)",
     transportNextScene: "Next scene",
     transportNextSceneTitle: "Next scene (N)",
-    transportAiTutor: "AI Tutor",
-    transportAiTutorTitle: "Toggle AI classroom tutor",
     transportLoopTitle: "Turn the A→B loop on/off (\\)",
     transportMarkATitle: "Set marker A at the current position ([)",
     transportMarkBTitle: "Set marker B at the current position (])",
@@ -103,8 +98,6 @@ const COPY = {
     transportPrevSceneTitle: "Quay lại cảnh trước (P)",
     transportNextScene: "Cảnh tiếp theo",
     transportNextSceneTitle: "Cảnh tiếp theo (N)",
-    transportAiTutor: "Trợ giảng AI",
-    transportAiTutorTitle: "Bật/tắt Trợ giảng AI trực tuyến",
     transportLoopTitle: "Bật/tắt lặp trong khoảng A→B (\\)",
     transportMarkATitle: "Đặt mốc A tại vị trí hiện tại ([)",
     transportMarkBTitle: "Đặt mốc B tại vị trí hiện tại (])",
@@ -133,8 +126,6 @@ export function TransportBar({
   onToggleMute,
   onFullscreen,
   onToggleHelp,
-  onToggleAi,
-  aiOpen,
   onPrevScene,
   onNextScene,
   currentSceneTitle,
@@ -263,7 +254,7 @@ export function TransportBar({
         )}
       </div>
 
-      {/* Right controls: A→B Loop, Speed, AI Assistant toggle, Shortcuts, Fullscreen */}
+      {/* Right controls: A→B Loop, Speed, Shortcuts, Fullscreen */}
       <div className="flex items-center gap-2">
         {/* A→B Loop */}
         <div className="flex items-center gap-1 rounded-xl border border-ink-700/80 bg-ink-900/70 p-1">
@@ -326,20 +317,6 @@ export function TransportBar({
             <span>{timebase.rate === 1 ? "1×" : `${timebase.rate}×`}</span>
           </button>
         </div>
-
-        {/* AI Assistant toggle — shows always; highlighted when open */}
-        {onToggleAi && (
-          <button
-            type="button"
-            onClick={onToggleAi}
-            className={`btn-icon ${aiOpen ? "text-brand-300" : "text-mist-400 hover:text-mist-100"}`}
-            title={t.transportAiTutorTitle}
-            aria-label={t.transportAiTutor}
-            aria-pressed={aiOpen}
-          >
-            <Sparkles className="h-4 w-4" />
-          </button>
-        )}
 
         <button
           type="button"
